@@ -12,10 +12,10 @@ class RiskAggregator:
     synchronous, low-latency evaluation path. It only inspects the current
     payload and avoids database access, cache lookups, or any external calls.
 
-    The public API includes placeholder hooks for future hybrid scoring via
-    ``stateful_context`` and ``external_risk_signal``. Those values are
-    currently ignored for scoring so the fast-path behavior remains fully
-    deterministic and self-contained.
+    The public API includes hooks for hybrid scoring via
+    ``stateful_context`` and ``external_risk_signal``. ``stateful_context`` is
+    currently ignored by the fast-path implementation, while
+    ``external_risk_signal`` is optionally blended into the final score.
     """
 
     def __init__(
@@ -42,8 +42,10 @@ class RiskAggregator:
 
         Args:
             payload: Current telemetry payload under evaluation.
-            stateful_context: Reserved for a future async/stateful scorer.
-            external_risk_signal: Reserved for future external enrichment.
+            stateful_context: Reserved for a future async/stateful scorer and
+                currently ignored by the fast-path implementation.
+            external_risk_signal: Optional external signal blended into the
+                computed score when provided.
 
         Returns:
             A dictionary with ``risk_score`` and the final enforcement
@@ -97,7 +99,7 @@ class RiskAggregator:
         risk_score = round(self._clamp(risk_score), 4)
         decision = self._decision(risk_score)
 
-        logger.info(
+        logger.debug(
             "RiskAggregator output: risk_score=%s decision=%s",
             risk_score,
             decision,
@@ -119,11 +121,24 @@ class RiskAggregator:
         if isinstance(lexical_hits, (list, tuple, set, dict)):
             lexical_hits = len(lexical_hits)
 
+        # Treat non-boolean integers as raw lexical hit counts that saturate
+        # against ``self.lexical_saturation_threshold``.
+        if isinstance(lexical_hits, int) and not isinstance(
+            lexical_hits, bool
+        ):
+            count = lexical_hits
+            if count <= 0:
+                return 0.0
+            return round(
+                min(float(count) / self.lexical_saturation_threshold, 1.0),
+                4,
+            )
+
         lexical_value = self._to_float(lexical_hits, default=0.0)
 
         if lexical_value <= 0:
             return 0.0
-        if lexical_value <= 1.0:
+        if 0 < lexical_value <= 1.0:
             return round(self._clamp(lexical_value), 4)
 
         return round(

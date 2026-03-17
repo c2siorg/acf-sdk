@@ -1,4 +1,3 @@
-import copy
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -118,27 +117,59 @@ class PolicyEngine:
             external_risk_signal=external_risk_signal,
         )
 
-        logger.info(
+        enforcement_mode = getattr(self.policy, "enforcement_mode", None)
+        computed_decision = result.get("decision")
+        final_result = result
+
+        if enforcement_mode == "monitoring":
+            final_result = dict(result)
+            if "decision" in final_result:
+                final_result["monitored_decision"] = final_result["decision"]
+                final_result["decision"] = "ALLOW"
+            logged_decision = (
+                f"{computed_decision} (monitoring - returning ALLOW)"
+            )
+        else:
+            logged_decision = computed_decision
+
+        logger.debug(
             "PolicyEngine decision: version=%s decision=%s risk_score=%s",
             self.policy.version,
-            result["decision"],
-            result["risk_score"],
+            logged_decision,
+            final_result.get("risk_score"),
         )
 
-        return result
+        return final_result
 
     @staticmethod
     def _merge_scanner_outputs(
         payload: Dict[str, Any], scanner_outputs: Optional[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        payload = copy.deepcopy(payload)
+        payload_copy: Dict[str, Any] = dict(payload)
 
         if not scanner_outputs:
-            return payload
+            return payload_copy
 
-        telemetry_data = payload.setdefault("telemetry_data", {})
-        delta = telemetry_data.setdefault("delta", {})
-        provenance_metadata = payload.setdefault("provenance_metadata", {})
+        existing_telemetry = payload_copy.get("telemetry_data")
+        if isinstance(existing_telemetry, dict):
+            telemetry_data: Dict[str, Any] = dict(existing_telemetry)
+        else:
+            telemetry_data = {}
+        payload_copy["telemetry_data"] = telemetry_data
+
+        existing_delta = telemetry_data.get("delta")
+        if isinstance(existing_delta, dict):
+            delta: Dict[str, Any] = dict(existing_delta)
+        else:
+            delta = {}
+        telemetry_data["delta"] = delta
+
+        existing_provenance = payload_copy.get("provenance_metadata")
+        if isinstance(existing_provenance, dict):
+            provenance_metadata: Dict[str, Any] = dict(existing_provenance)
+        else:
+            provenance_metadata = {}
+        payload_copy["provenance_metadata"] = provenance_metadata
 
         for key in ("obfuscation_severity", "lexical_hits"):
             if key in scanner_outputs:
@@ -149,7 +180,7 @@ class PolicyEngine:
                 "trust_weight"
             ]
 
-        return payload
+        return payload_copy
 
 
 def evaluate_policy(
