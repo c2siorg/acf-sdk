@@ -15,6 +15,7 @@ payloads/
   context_layer.json       # RAG poisoning, tool output re-injection, context flooding
   normalization_evasion.json  # Encoding tricks to bypass lexical detection
   memory_layer.json        # Memory poisoning, provenance spoofing, replay attacks
+  cross_layer.json         # Cross-layer attacks that become malicious after decode/normalization
 ```
 
 ## Payload Schema
@@ -26,8 +27,8 @@ Each payload has this structure:
 | `id` | string | Unique identifier (e.g., PI-001, CX-002) |
 | `name` | string | Short descriptive name |
 | `description` | string | What the attack does and why it works |
-| `payload` | string or object | The actual attack content |
-| `expected_detection_layer` | string | Which layer should catch this (normalization, lexical, semantic, provenance) |
+| `payload` | string, object, or null | The actual attack content (may be null for stateful multi-turn cases) |
+| `expected_detection_layer` | string | Which layer should catch this (normalization, lexical, semantic, provenance, none) |
 | `expected_action` | string | Expected enforcement decision: BLOCK, SANITIZE, or ALLOW |
 | `severity` | string | low, medium, high, critical |
 | `tags` | string[] | Categorization tags for filtering |
@@ -43,8 +44,9 @@ Multi-turn attacks include a `conversation_history` array and set `requires_stat
 | RAG document injection | | | x | | 1 |
 | Tool output re-injection | | x | | | 1 |
 | Context window flooding | | | x | | 1 |
-| Unicode/homoglyph evasion | x | | | | 1 |
-| Encoding tricks (Base64, leetspeak) | x | | | | 3 |
+| Unicode/homoglyph evasion | x | | | | 2 |
+| Encoding tricks (Base64, leetspeak, zero-width) | x | | | | 3 |
+| Cross-layer decoding/normalization chains | | x | | | 3 |
 | Memory poisoning | | | x | | 1 |
 | Provenance spoofing | | | | x | 1 |
 | Replay attacks | | | | x | 1 |
