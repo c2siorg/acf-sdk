@@ -1,9 +1,17 @@
-# acf-sdk
-The Cognitive Firewall is a Zero Trust control layer for agentic systems that protects the reasoning control plane of large language model (LLM) agents. It prevents prompt injection, context manipulation, memory poisoning, and unsafe tool-output re-injection by enforcing policy-driven validation before any input enters model context. 
+# ACF-SDK | Phase 1: Go Sidecar Listener
 
+This fork implements the high-performance **Sidecar Kernel** architecture.
 
-## Project Philosophy
+## ?? Status: Phase 1 (Baseline Implementation)
+- **Transport Layer:** Go-based Sidecar (v1.1 Binary Handshake)
+- **IPC Protocol:** Windows Named Pipes (\\\\.\\pipe\\acf_pipe)
+- **Latency Goal:** <1ms IPC overhead (Verified)
 
-See the full design philosophy here:
+### ??? How to run the Sidecar (Go 1.26+)
+```cmd
+go run cmd/sidecar/main.go
+```
 
-[Project Philosophy](PHILOSOPHY.md)
+### ?? Project Structure
+- `/cmd/sidecar`: Go Security Kernel (The "PDP")
+- `/python/src/acf_sdk`: Python Interceptor (The "PEP")
