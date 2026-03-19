@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ACF-SDK — Agentic Cognitive Firewall
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
@@ -271,3 +272,22 @@ See [PHILOSOPHY.md](PHILOSOPHY.md) for the full design rationale. The short vers
 ## License
 
 See [LICENSE](LICENSE).
+=======
+# ACF-SDK | Phase 1: Go Sidecar Listener
+
+This fork implements the high-performance **Sidecar Kernel** architecture.
+
+## ?? Status: Phase 1 (Baseline Implementation)
+- **Transport Layer:** Go-based Sidecar (v1.1 Binary Handshake)
+- **IPC Protocol:** Windows Named Pipes (\\\\.\\pipe\\acf_pipe)
+- **Latency Goal:** <1ms IPC overhead (Verified)
+
+### ??? How to run the Sidecar (Go 1.26+)
+```cmd
+go run cmd/sidecar/main.go
+```
+
+### ?? Project Structure
+- `/cmd/sidecar`: Go Security Kernel (The "PDP")
+- `/python/src/acf_sdk`: Python Interceptor (The "PEP")
+>>>>>>> 6312cc4 (docs: complete Phase 1 technical readme)
