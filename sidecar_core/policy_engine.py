@@ -64,13 +64,21 @@ def load_policy(filepath: str) -> FirewallPolicy:
 
 
 class PolicyEngine:
-    """Thin orchestration layer for the sidecar evaluation phase.
+    """Policy Decision Point (PDP) - enforces policy decisions.
 
-    The engine stays synchronous and lightweight: scanner outputs are merged
-    into the current payload and forwarded directly to ``RiskAggregator``.
-    Future async/stateful enrichments can plug into the aggregator hooks
-    without changing this call shape.
+    Orchestrates the evaluation pipeline:
+    1. Normalizes scanner outputs into fixed signal schema
+    2. Calls RiskAggregator to compute risk score (O(1))
+    3. Maps risk score to enforcement decision based on thresholds
+    4. Applies enforcement_mode (blocking vs monitoring)
+    5. Returns final decision + metadata for audit logging
     """
+
+    DECISION_THRESHOLDS = {
+        "allow": 0.4,
+        "sanitize": 0.7,
+        "block": 1.0,
+    }
 
     def __init__(
         self,
@@ -82,113 +90,129 @@ class PolicyEngine:
             self.risk_aggregator = risk_aggregator
             return
 
-        weights = (
-            policy.risk_aggregator.weights
-            if policy.risk_aggregator is not None
-            else RiskAggregatorWeights()
-        )
-        self.risk_aggregator = RiskAggregator(
-            obfuscation_weight=weights.obfuscation,
-            lexical_weight=weights.lexical,
-            provenance_weight=weights.provenance,
-        )
+        weights_dict = None
+        if policy.risk_aggregator is not None:
+            weights_dict = {
+                "obfuscation": policy.risk_aggregator.weights.obfuscation,
+                "lexical": policy.risk_aggregator.weights.lexical,
+                "provenance": policy.risk_aggregator.weights.provenance,
+                "external": 0.1,
+            }
+        self.risk_aggregator = RiskAggregator(weights=weights_dict)
 
     def evaluate_payload(
         self,
         payload: Dict[str, Any],
         scanner_outputs: Optional[Dict[str, Any]] = None,
-        stateful_context: Optional[Dict[str, Any]] = None,
-        external_risk_signal: Optional[float] = None,
     ) -> Dict[str, Any]:
-        """Evaluate the current payload and return the final decision.
+        """Evaluate payload and return enforcement decision.
 
-        ``scanner_outputs`` is expected to contain normalized or raw outputs
-        from upstream scanners, such as ``lexical_hits`` or an updated
-        ``obfuscation_severity``. These are merged into the payload before
-        risk aggregation so the policy engine returns the final enforcement
-        decision for the current request.
+        Pipeline:
+        1. Normalize scanner outputs into risk_context.signals
+        2. Aggregate signals into risk score
+        3. Map score to decision
+        4. Apply enforcement_mode
+
+        Args:
+            payload: Original request payload (contains telemetry, provenance).
+            scanner_outputs: Normalized signal outputs from upstream scanners.
+
+        Returns:
+            Decision dict:
+            {
+                "decision": "ALLOW" | "SANITIZE" | "BLOCK",
+                "score": float,
+                "session_id": str,
+                "monitored_decision": str (if enforcement_mode=monitoring),
+            }
         """
-        enriched_payload = self._merge_scanner_outputs(
-            payload, scanner_outputs
-        )
-        result = self.risk_aggregator.compute_risk(
-            enriched_payload,
-            stateful_context=stateful_context,
-            external_risk_signal=external_risk_signal,
-        )
+        risk_context = self._build_risk_context(payload, scanner_outputs)
+
+        result = self.risk_aggregator.aggregate_risk(risk_context)
+
+        score = result.get("score", 0.0)
+        computed_decision = self._score_to_decision(score)
 
         enforcement_mode = getattr(self.policy, "enforcement_mode", None)
-        computed_decision = result.get("decision")
-        final_result = result
+        final_decision = computed_decision
 
         if enforcement_mode == "monitoring":
-            final_result = dict(result)
-            if "decision" in final_result:
-                final_result["monitored_decision"] = final_result["decision"]
-                final_result["decision"] = "ALLOW"
-            logged_decision = (
-                f"{computed_decision} (monitoring - returning ALLOW)"
-            )
-        else:
-            logged_decision = computed_decision
+            result["monitored_decision"] = computed_decision
+            final_decision = "ALLOW"
+
+        result["decision"] = final_decision
 
         logger.debug(
-            "PolicyEngine decision: version=%s decision=%s risk_score=%s",
+            "PolicyEngine decision: version=%s decision=%s score=%s "
+            "enforcement_mode=%s",
             self.policy.version,
-            logged_decision,
-            final_result.get("risk_score"),
+            final_decision,
+            score,
+            enforcement_mode,
         )
 
-        return final_result
+        return result
+
+    def _score_to_decision(self, score: float) -> str:
+        """Map risk score to enforcement decision."""
+        if score < self.DECISION_THRESHOLDS["allow"]:
+            return "ALLOW"
+        if score < self.DECISION_THRESHOLDS["sanitize"]:
+            return "SANITIZE"
+        return "BLOCK"
+
+    def _build_risk_context(
+        self,
+        payload: Dict[str, Any],
+        scanner_outputs: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Build normalized risk_context from payload and scanner outputs."""
+        session_id = payload.get("session_id", "unknown")
+
+        signals = self._normalize_signals(payload, scanner_outputs)
+
+        risk_context: Dict[str, Any] = {
+            "session_id": session_id,
+            "signals": signals,
+            "state": None,
+        }
+
+        return risk_context
 
     @staticmethod
-    def _merge_scanner_outputs(
-        payload: Dict[str, Any], scanner_outputs: Optional[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        payload_copy: Dict[str, Any] = dict(payload)
+    def _normalize_signals(
+        payload: Dict[str, Any],
+        scanner_outputs: Optional[Dict[str, Any]],
+    ) -> Dict[str, float]:
+        """Normalize scanner outputs to fixed signal schema."""
+        signals: Dict[str, float] = {
+            "obfuscation_severity": 0.0,
+            "lexical_score": 0.0,
+            "provenance_trust": 1.0,
+            "external_risk": 0.0,
+        }
 
-        if not scanner_outputs:
-            return payload_copy
+        if scanner_outputs:
+            signals["obfuscation_severity"] = float(
+                scanner_outputs.get("obfuscation_severity", 0.0)
+            )
+            signals["lexical_score"] = float(
+                scanner_outputs.get("lexical_score", 0.0)
+            )
+            signals["provenance_trust"] = float(
+                scanner_outputs.get("provenance_trust", 1.0)
+            )
+            signals["external_risk"] = float(
+                scanner_outputs.get("external_risk", 0.0)
+            )
 
-        existing_telemetry = payload_copy.get("telemetry_data")
-        if isinstance(existing_telemetry, dict):
-            telemetry_data: Dict[str, Any] = dict(existing_telemetry)
-        else:
-            telemetry_data = {}
-        payload_copy["telemetry_data"] = telemetry_data
-
-        existing_delta = telemetry_data.get("delta")
-        if isinstance(existing_delta, dict):
-            delta: Dict[str, Any] = dict(existing_delta)
-        else:
-            delta = {}
-        telemetry_data["delta"] = delta
-
-        existing_provenance = payload_copy.get("provenance_metadata")
-        if isinstance(existing_provenance, dict):
-            provenance_metadata: Dict[str, Any] = dict(existing_provenance)
-        else:
-            provenance_metadata = {}
-        payload_copy["provenance_metadata"] = provenance_metadata
-
-        for key in ("obfuscation_severity", "lexical_hits"):
-            if key in scanner_outputs:
-                delta[key] = scanner_outputs[key]
-
-        if "trust_weight" in scanner_outputs:
-            provenance_metadata["trust_weight"] = scanner_outputs[
-                "trust_weight"
-            ]
-
-        return payload_copy
+        return signals
 
 
 def evaluate_policy(
     payload: Dict[str, Any],
     policy_path: str,
     scanner_outputs: Optional[Dict[str, Any]] = None,
-    stateful_context: Optional[Dict[str, Any]] = None,
-    external_risk_signal: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Convenience entrypoint for one-shot evaluation.
 
@@ -198,8 +222,8 @@ def evaluate_policy(
             "obfuscation_severity": normalization_result.get(
                 "obfuscation_severity", 0.0
             ),
-            "lexical_hits": lexical_scan_result.get("hits", 0),
-            "trust_weight": provenance_result.get("trust_weight", 1.0),
+            "lexical_score": lexical_scan_result.get("score", 0.0),
+            "provenance_trust": provenance_result.get("trust_weight", 1.0),
         }
         decision = evaluate_policy(
             payload,
@@ -212,6 +236,4 @@ def evaluate_policy(
     return engine.evaluate_payload(
         payload,
         scanner_outputs=scanner_outputs,
-        stateful_context=stateful_context,
-        external_risk_signal=external_risk_signal,
     )
