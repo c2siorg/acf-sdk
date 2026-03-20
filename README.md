@@ -5,7 +5,7 @@
 
 A Zero Trust security layer for LLM agents. Enforces policy-driven validation at every point an agent ingests input — not just at the front door.
 
-> **Status: active development — Phase 1 (wire protocol) in progress.**
+> **Status: Phase 1 complete — wire protocol and crypto. Phase 2 (pipeline stages) next.**
 
 ---
 
@@ -142,57 +142,77 @@ Test policies with `make opa-test` — runs the full Rego test suite using `opa 
 
 ---
 
-<!-- ## Getting started
+## Getting started
 
 ### Prerequisites
 
 - Go 1.22+
 - Python 3.10+
-- [OPA](https://www.openpolicyagent.org/docs/latest/#running-opa) (for policy tests)
+- [OPA](https://www.openpolicyagent.org/docs/latest/#running-opa) (for policy tests, Phase 3+)
 
-### Build the sidecar
-
-```bash
-make build
-# → bin/acf-sidecar
-```
-
-### Configure
+### 1. Generate an HMAC key
 
 ```bash
-cp config/sidecar.example.yaml config/sidecar.yaml
-export ACF_HMAC_KEY=$(python3 -c "import secrets,base64; print(base64.b64encode(secrets.token_bytes(32)).decode())")
+export ACF_HMAC_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 ```
 
-### Run
+Keep this value — both the sidecar and the SDK must use the same key.
+
+### 2. Build and run the sidecar
 
 ```bash
-./bin/acf-sidecar --config config/sidecar.yaml
+cd sidecar && go build -o ../bin/acf-sidecar ./cmd/sidecar
+./bin/acf-sidecar
+# sidecar: listening on /tmp/acf.sock (phase 1 — hardcoded ALLOW)
 ```
 
-### Install the Python SDK
+Or with `make`:
+
+```bash
+make build && ./bin/acf-sidecar
+```
+
+### 3. Install the Python SDK
 
 ```bash
 pip install -e sdk/python
 ```
 
-### Run tests
+### 4. Send your first request
 
-```bash
-make test            # Go unit tests
-make opa-test        # Rego policy tests
-make sdk-test-python # Python SDK tests
-make integration     # End-to-end adversarial test suite (requires running sidecar)
+```python
+from acf import Firewall, Decision
+
+fw = Firewall()  # reads ACF_HMAC_KEY and connects to /tmp/acf.sock
+
+result = fw.on_prompt("hello world")
+assert result == Decision.ALLOW
+print("Round-trip OK:", result)
 ```
 
-### Docker (sidecar + OTel collector)
+### 5. Run the test suites
 
 ```bash
+# Go unit tests
+cd sidecar && go test ./internal/crypto/... ./internal/transport/... -v
+
+# Python unit tests
+cd sdk/python && python -m pytest -v
+
+# Or both via make (from repo root)
+make test            # Go tests
+make sdk-test-python # Python tests
+```
+
+### Docker (sidecar + optional OTel collector)
+
+```bash
+# Set your key in the environment first, then:
 docker compose up -d
 
-# With observability:
+# With observability (OTel collector):
 docker compose --profile observability up -d
-``` -->
+```
 
 ---
 
@@ -216,8 +236,8 @@ acf-sdk/
 
 | Phase | Goal | Status |
 |---|---|---|
-| 1 | Wire protocol + HMAC/nonce crypto | In progress |
-| 2 | Pipeline stages (validate/normalise/scan/aggregate) | Pending |
+| 1 | Wire protocol + HMAC/nonce crypto | **Complete** — 23 Go tests, 35 Python tests |
+| 2 | Pipeline stages (validate/normalise/scan/aggregate) | Next |
 | 3 | OPA integration + Rego policies | Pending |
 | 4 | OTel observability + integration test suite | Pending |
 | v2 | Stateful session risk, additional hooks, TypeScript SDK | Deferred |
@@ -239,6 +259,7 @@ See [PHILOSOPHY.md](PHILOSOPHY.md) for the full design rationale. The short vers
 ## Documentation
 
 - [Architecture](docs/architecture.md) — full system design, IPC wire protocol, pipeline stages
+- [Phase 1](docs/phase1.md) — what was built, test coverage, how to run
 - [Policy authoring](docs/policy-authoring.md) — how to write and test Rego policies
 - [Philosophy](PHILOSOPHY.md) — design principles and threat model rationale
 
