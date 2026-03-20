@@ -1,17 +1,16 @@
-# ACF-SDK | Phase 1: Go Sidecar Listener
+ACF-SDK | High-Performance Security Sidecar
+Status: v0.1-Alpha (Core IPC & Lexical Kernel Verified)
+Architecture: Policy Decision Point (PDP) Sidecar Pattern
 
-This fork implements the high-performance **Sidecar Kernel** architecture.
+This repository implements the Centralized Enforcement (Point 8) of the AI Control Framework. It separates security logic (Go) from the AI application (Python) using high-speed Inter-Process Communication (IPC).
 
-## ?? Status: Phase 1 (Baseline Implementation)
-- **Transport Layer:** Go-based Sidecar (v1.1 Binary Handshake)
-- **IPC Protocol:** Windows Named Pipes (\\\\.\\pipe\\acf_pipe)
-- **Latency Goal:** <1ms IPC overhead (Verified)
+🚀 Key Features
+Dual-Language Bridge: High-performance Go Security Kernel + Developer-friendly Python SDK.
 
-### ??? How to run the Sidecar (Go 1.26+)
-```cmd
-go run cmd/sidecar/main.go
-```
+Ultra-Low Latency: Windows Named Pipes (\\.\pipe\acf_security_pipe) providing <1ms overhead.
 
-### ?? Project Structure
-- `/cmd/sidecar`: Go Security Kernel (The "PDP")
-- `/python/src/acf_sdk`: Python Interceptor (The "PEP")
+Multi-Layer Defense: * L1 (Hygiene): Base64 de-obfuscation and Unicode normalization.
+
+L2 (Lexical): Deterministic regex-based SQLi and Prompt Injection detection.
+
+L3 (Heuristic): [Summer 2026 Goal] Semantic analysis via vector embeddings.
