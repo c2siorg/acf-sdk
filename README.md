@@ -14,3 +14,14 @@ Multi-Layer Defense: * L1 (Hygiene): Base64 de-obfuscation and Unicode normaliza
 L2 (Lexical): Deterministic regex-based SQLi and Prompt Injection detection.
 
 L3 (Heuristic): [Summer 2026 Goal] Semantic analysis via vector embeddings.
+
+
+Project Structure & Contributor Focus
+
+### 📂 Project Structure & Contributor Guide
+
+| Directory | Language | Responsibility | Contributor Focus |
+| :--- | :--- | :--- | :--- |
+| `cmd/sidecar/` | Go | **The "PDP"** (Policy Decision Point) | **@Vibhor:** Infra & Pipe optimizations. |
+| `internal/kernel/` | Go | **Security Logic** & Normalization | **@Aditya:** Regex rules & L1/L2 logic. |
+| `acf_sdk/` | Python | **The "PEP"** (Policy Enforcement Point) | **SDK API** & Decorator refinements. |
