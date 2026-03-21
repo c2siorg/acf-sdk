@@ -33,16 +33,21 @@ func NewNonceStore(ttl time.Duration) *NonceStore {
 // (or has already expired). Returns true if the nonce is still active —
 // indicating a replay attempt. The check and record are atomic.
 func (ns *NonceStore) Seen(nonce []byte) bool {
-	key := string(nonce)
+	return ns.SeenString(string(nonce))
+}
+
+// SeenString is the string variant of Seen and is used by the validate stage
+// for provenance nonces carried inside the JSON payload.
+func (ns *NonceStore) SeenString(nonce string) bool {
 	now := time.Now()
 
 	ns.mu.Lock()
 	defer ns.mu.Unlock()
 
-	if exp, ok := ns.m[key]; ok && now.Before(exp) {
+	if exp, ok := ns.m[nonce]; ok && now.Before(exp) {
 		return true // replay
 	}
-	ns.m[key] = now.Add(ns.ttl)
+	ns.m[nonce] = now.Add(ns.ttl)
 	return false
 }
 
