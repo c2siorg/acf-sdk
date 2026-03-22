@@ -1,67 +1,55 @@
 // listener.go — IPC accept loop.
-// Accepts connections from the platform Connector (UDS on Linux/macOS,
-// named pipe on Windows). Spawns one goroutine per connection.
-// Each connection: read frame → verify HMAC → check nonce → write response.
-// Invalid HMAC or reused nonce drops the connection immediately with no response.
 package transport
 
 import (
 	"log"
 	"net"
+	"strconv"
+	"time"
 
-	"github.com/acf-sdk/sidecar/internal/crypto"
+	"github.com/c2siorg/acf-sdk/sidecar/internal/crypto"
+	"github.com/c2siorg/acf-sdk/sidecar/pkg/riskcontext"
 )
 
-// Config holds listener configuration.
 type Config struct {
-	// Address is the UDS socket path (Linux/macOS) or named pipe name (Windows).
-	// If empty, Connector.DefaultAddress() is used.
 	Address    string
 	Connector  Connector
 	Signer     *crypto.Signer
 	NonceStore *crypto.NonceStore
+	Pipeline   PipelineInterface
 }
 
-// Listener wraps a platform net.Listener and handles incoming connections.
+type PipelineInterface interface {
+	Process(ctx *riskcontext.RiskContext)
+}
+
 type Listener struct {
 	cfg    Config
 	ln     net.Listener
 	stopCh chan struct{}
 }
 
-// NewListener creates a Listener bound to cfg.Address using cfg.Connector.
-// Any platform-specific cleanup (e.g. stale UDS socket file) is performed
-// before binding.
 func NewListener(cfg Config) (*Listener, error) {
 	if cfg.Address == "" {
 		cfg.Address = cfg.Connector.DefaultAddress()
 	}
-
 	if err := cfg.Connector.Cleanup(cfg.Address); err != nil {
 		return nil, err
 	}
-
 	ln, err := cfg.Connector.Listen(cfg.Address)
 	if err != nil {
 		return nil, err
 	}
-
-	return &Listener{
-		cfg:    cfg,
-		ln:     ln,
-		stopCh: make(chan struct{}),
-	}, nil
+	return &Listener{cfg: cfg, ln: ln, stopCh: make(chan struct{})}, nil
 }
 
-// Serve enters the accept loop. Blocks until Stop is called.
-// Returns nil after a clean shutdown, or a non-nil error on unexpected failure.
 func (l *Listener) Serve() error {
 	for {
 		conn, err := l.ln.Accept()
 		if err != nil {
 			select {
 			case <-l.stopCh:
-				return nil // clean shutdown
+				return nil
 			default:
 				return err
 			}
@@ -70,46 +58,74 @@ func (l *Listener) Serve() error {
 	}
 }
 
-// Stop closes the underlying listener, causing Serve to return.
 func (l *Listener) Stop() {
 	select {
 	case <-l.stopCh:
-		// already stopped
 	default:
 		close(l.stopCh)
 	}
 	l.ln.Close()
 }
 
-// handleConn processes a single client connection.
 func (l *Listener) handleConn(conn net.Conn) {
 	defer conn.Close()
 
-	// 1. Decode the frame header and payload.
+	// 1. Decode Request
 	rf, err := DecodeRequest(conn)
 	if err != nil {
 		log.Printf("transport: decode error: %v", err)
 		return
 	}
 
-	// 2. Verify HMAC.
+	// 2. Verify Security
 	length := uint32(len(rf.Payload))
 	signedMsg := SignedMessage(rf.Version, length, rf.Nonce, rf.Payload)
 	if !l.cfg.Signer.Verify(signedMsg, rf.HMAC[:]) {
-		log.Printf("transport: %v", ErrBadHMAC)
+		log.Printf("transport: security alert: HMAC mismatch")
 		return
 	}
-
-	// 3. Check nonce replay.
 	if l.cfg.NonceStore.Seen(rf.Nonce[:]) {
-		log.Printf("transport: %v", ErrReplayNonce)
+		log.Printf("transport: security alert: Replay detected")
 		return
 	}
 
-	// 4. Phase 1: return a hardcoded ALLOW response.
-	//    Pipeline stages are wired in Phase 2.
-	resp := EncodeResponse(&ResponseFrame{Decision: DecisionAllow})
-	if _, err := conn.Write(resp); err != nil {
-		log.Printf("transport: write error: %v", err)
+	// 3. Create RiskContext
+	ctx := &riskcontext.RiskContext{
+		SessionID:  "sid-" + strconv.FormatInt(time.Now().Unix(), 10),
+		Payload:    string(rf.Payload),
+		Signals:    []string{"transport_verified"}, 
+		Provenance: "sdk-client",
+		HookType:   "on_prompt",
+	}
+
+	// 4. Process Pipeline
+	if l.cfg.Pipeline != nil {
+		l.cfg.Pipeline.Process(ctx)
+	}
+
+	// 5. Determine Decision
+	var decision byte = DecisionAllow 
+	if ctx.Score > 0.8 {
+		decision = DecisionBlock
+	} else if ctx.Score > 0.4 {
+		decision = DecisionSanitise
+	}
+
+	// 6. Map back to SanitisedPayload
+	payloadStr, ok := ctx.Payload.(string)
+	if !ok {
+		payloadStr = "" 
+	}
+	
+	respFrame := &ResponseFrame{
+		Decision:         decision,
+		SanitisedPayload: []byte(payloadStr), // Matches frame.go
+	}
+
+	// 7. Write to Connection
+	// EncodeResponse returns the bytes; we then write them to 'conn'
+	respBytes := EncodeResponse(respFrame)
+	if _, err := conn.Write(respBytes); err != nil {
+		log.Printf("transport: response error: %v", err)
 	}
 }

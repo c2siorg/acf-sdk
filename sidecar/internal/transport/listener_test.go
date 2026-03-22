@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/acf-sdk/sidecar/internal/crypto"
+	"github.com/c2siorg/acf-sdk/sidecar/internal/crypto"
 )
 
 func newTestListener(t *testing.T) (*Listener, *crypto.Signer, string) {
