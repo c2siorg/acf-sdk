@@ -4,6 +4,7 @@ This module defines a fixed-size, O(1) aggregation surface for policy input.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -37,6 +38,8 @@ HOOK_MULTIPLIERS = {
 
 
 def _clamp01(value: float) -> float:
+    if not math.isfinite(value):
+        return 0.0
     if value < 0.0:
         return 0.0
     if value > 1.0:
@@ -44,19 +47,68 @@ def _clamp01(value: float) -> float:
     return value
 
 
-def _normalize_signals(signals: dict[str, float]) -> dict[str, float]:
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Safely convert untyped input to finite float."""
+
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(parsed):
+        return default
+    return parsed
+
+
+def _safe_bool(value: Any, default: bool = False) -> bool:
+    """Parse bool-like values without truthiness pitfalls."""
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+        return default
+
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y"}:
+            return True
+        if normalized in {"false", "0", "no", "n"}:
+            return False
+        return default
+
+    return default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Safely convert untyped input to int."""
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_signals(signals: dict[str, Any]) -> dict[str, float]:
     """Return a fixed-size signal map, ignoring non-allowed keys."""
 
     # Explicit fixed-key extraction keeps aggregation O(1), even if callers
     # pass additional keys.
     return {
         _SIGNAL_OBFUSCATION: _clamp01(
-            float(signals.get(_SIGNAL_OBFUSCATION, 0.0))
+            _safe_float(signals.get(_SIGNAL_OBFUSCATION, 0.0))
         ),
-        _SIGNAL_LEXICAL: _clamp01(float(signals.get(_SIGNAL_LEXICAL, 0.0))),
-        _SIGNAL_SEMANTIC: _clamp01(float(signals.get(_SIGNAL_SEMANTIC, 0.0))),
+        _SIGNAL_LEXICAL: _clamp01(
+            _safe_float(signals.get(_SIGNAL_LEXICAL, 0.0))
+        ),
+        _SIGNAL_SEMANTIC: _clamp01(
+            _safe_float(signals.get(_SIGNAL_SEMANTIC, 0.0))
+        ),
         _SIGNAL_PROVENANCE: _clamp01(
-            float(signals.get(_SIGNAL_PROVENANCE, 0.0))
+            _safe_float(signals.get(_SIGNAL_PROVENANCE, 0.0))
         ),
     }
 
@@ -70,18 +122,23 @@ class RiskContext:
     provenance: dict[str, Any]
     metadata: dict[str, Any]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "signals", dict(self.signals))
+        object.__setattr__(self, "provenance", dict(self.provenance))
+        object.__setattr__(self, "metadata", dict(self.metadata))
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "score": self.score,
-            "signals": self.signals,
-            "provenance": self.provenance,
-            "metadata": self.metadata,
+            "signals": dict(self.signals),
+            "provenance": dict(self.provenance),
+            "metadata": dict(self.metadata),
         }
 
 
 def aggregate_risk(
     *,
-    signals: dict[str, float],
+    signals: dict[str, Any],
     provenance: dict[str, Any],
     metadata: dict[str, Any],
 ) -> RiskContext:
@@ -95,13 +152,13 @@ def aggregate_risk(
 
     normalized_provenance = {
         "execution_id": str(provenance.get("execution_id", "")),
-        "trusted": bool(provenance.get("trusted", False)),
-        "nonce_valid": bool(provenance.get("nonce_valid", False)),
+        "trusted": _safe_bool(provenance.get("trusted", False)),
+        "nonce_valid": _safe_bool(provenance.get("nonce_valid", False)),
     }
 
     normalized_metadata = {
         "hook": str(metadata.get("hook", "")),
-        "timestamp": int(metadata.get("timestamp", 0)),
+        "timestamp": _safe_int(metadata.get("timestamp", 0)),
     }
 
     score = _clamp01(

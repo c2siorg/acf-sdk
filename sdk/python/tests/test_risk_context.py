@@ -1,5 +1,7 @@
 """Tests for acf.sdk_integration.risk_context."""
 
+import math
+
 from acf.sdk_integration.risk_context import (
     RiskContext,
     WEIGHTS,
@@ -175,3 +177,125 @@ def test_missing_signals_defaults():
     assert ctx.signals["lexical"] == 0.0
     assert ctx.signals["semantic"] == 0.0
     assert ctx.signals["provenance"] == 0.0
+
+
+def test_nan_signal_normalization():
+    ctx = aggregate_risk(
+        signals={
+            "obfuscation": math.nan,
+            "lexical": 0.25,
+            "semantic": math.inf,
+            "provenance": -math.inf,
+        },
+        provenance={
+            "execution_id": "exec-nan",
+            "trusted": True,
+            "nonce_valid": True,
+        },
+        metadata={
+            "hook": "on_prompt",
+            "timestamp": 1710000300,
+        },
+    )
+
+    assert ctx.signals["obfuscation"] == 0.0
+    assert ctx.signals["semantic"] == 0.0
+    assert ctx.signals["provenance"] == 0.0
+    assert 0.0 <= ctx.score <= 1.0
+
+
+def test_non_numeric_signal_values_default_to_zero():
+    ctx = aggregate_risk(
+        signals={
+            "obfuscation": "high",
+            "lexical": None,
+            "semantic": "0.4",
+            "provenance": {},
+        },
+        provenance={
+            "execution_id": "exec-bad-signal",
+            "trusted": True,
+            "nonce_valid": True,
+        },
+        metadata={
+            "hook": "on_prompt",
+            "timestamp": 1710000400,
+        },
+    )
+
+    assert ctx.signals["obfuscation"] == 0.0
+    assert ctx.signals["lexical"] == 0.0
+    assert ctx.signals["semantic"] == 0.4
+    assert ctx.signals["provenance"] == 0.0
+
+
+def test_provenance_bool_parsing_from_strings():
+    ctx = aggregate_risk(
+        signals={
+            "obfuscation": 0.0,
+            "lexical": 0.0,
+            "semantic": 0.0,
+            "provenance": 0.0,
+        },
+        provenance={
+            "execution_id": "exec-bool-str",
+            "trusted": "false",
+            "nonce_valid": "true",
+        },
+        metadata={
+            "hook": "on_prompt",
+            "timestamp": 1710000500,
+        },
+    )
+
+    assert ctx.provenance["trusted"] is False
+    assert ctx.provenance["nonce_valid"] is True
+
+
+def test_invalid_metadata_timestamp_defaults_zero():
+    ctx = aggregate_risk(
+        signals={
+            "obfuscation": 0.0,
+            "lexical": 0.0,
+            "semantic": 0.0,
+            "provenance": 0.0,
+        },
+        provenance={
+            "execution_id": "exec-ts",
+            "trusted": True,
+            "nonce_valid": True,
+        },
+        metadata={
+            "hook": "on_prompt",
+            "timestamp": "not-a-number",
+        },
+    )
+
+    assert ctx.metadata["timestamp"] == 0
+
+
+def test_to_dict_returns_defensive_copies():
+    ctx = aggregate_risk(
+        signals={
+            "obfuscation": 0.1,
+            "lexical": 0.2,
+            "semantic": 0.3,
+            "provenance": 0.4,
+        },
+        provenance={
+            "execution_id": "exec-copy",
+            "trusted": True,
+            "nonce_valid": True,
+        },
+        metadata={
+            "hook": "on_prompt",
+            "timestamp": 1710000600,
+        },
+    )
+
+    payload = ctx.to_dict()
+    payload["signals"]["lexical"] = 0.99
+    payload["metadata"]["hook"] = "on_tool_call"
+
+    assert ctx.signals["lexical"] == 0.2
+    assert ctx.metadata["hook"] == "on_prompt"
