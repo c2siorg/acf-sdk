@@ -1,9 +1,15 @@
-// normalise.go — Stage 2 of the pipeline.
-// Produces canonical text for scanning by applying (in order):
-//   1. Recursive URL decoding
-//   2. Recursive Base64 and hex decoding
-//   3. Unicode NFKC normalisation
-//   4. Zero-width character stripping
-//   5. Leetspeak cleaning
-// The canonical text is written back into the RiskContext for the scan stage.
 package pipeline
+
+import (
+	"strings"
+	"github.com/c2siorg/acf-sdk/sidecar/pkg/riskcontext"
+)
+
+func Normalise(ctx *riskcontext.RiskContext) {
+	payload, ok := ctx.Payload.(string)
+	if !ok {
+		return
+	}
+	// Transform to lowercase and trim to ensure Scan finds matches
+	ctx.Payload = strings.ToLower(strings.TrimSpace(payload))
+}

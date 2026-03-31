@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/acf-sdk/sidecar/internal/crypto"
+	"github.com/c2siorg/acf-sdk/sidecar/internal/crypto"
 )
 
 func testSigner(t *testing.T) *crypto.Signer {

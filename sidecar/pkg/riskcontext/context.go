@@ -35,3 +35,9 @@ type RiskContext struct {
 	// the pipeline runs and contains session history for stateful policies.
 	State any `json:"state"`
 }
+
+    // PolicyResult is required by the OPA evaluation engine
+    type PolicyResult struct {
+    Decision string `json:"decision"`
+    Reason   string `json:"reason"`
+}
