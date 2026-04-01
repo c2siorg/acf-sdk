@@ -104,3 +104,20 @@ func TestNewSignerFromEnv_InvalidHex(t *testing.T) {
 		t.Error("expected error for invalid hex value")
 	}
 }
+
+func TestVerifyHex_ValidMAC(t *testing.T) {
+	s := testSigner(t)
+	msg := []byte("verify me")
+	macHex := s.SignHex(msg)
+	if !s.VerifyHex(msg, macHex) {
+		t.Error("VerifyHex returned false for a valid MAC")
+	}
+}
+
+func TestProvenanceMessage_Deterministic(t *testing.T) {
+	msg1 := ProvenanceMessage("on_prompt", "user", "s1", "e1", "n1", 1700000000, []byte(`"hello"`))
+	msg2 := ProvenanceMessage("on_prompt", "user", "s1", "e1", "n1", 1700000000, []byte(`"hello"`))
+	if string(msg1) != string(msg2) {
+		t.Error("ProvenanceMessage should be deterministic")
+	}
+}

@@ -76,3 +76,15 @@ func TestNonceStore_Concurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestNonceStore_SeenString(t *testing.T) {
+	ns := NewNonceStore(5 * time.Minute)
+	defer ns.Stop()
+
+	if ns.SeenString("string-nonce") {
+		t.Fatal("SeenString returned true on first use")
+	}
+	if !ns.SeenString("string-nonce") {
+		t.Fatal("SeenString returned false on replay")
+	}
+}
