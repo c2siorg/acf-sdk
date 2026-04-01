@@ -218,3 +218,5 @@ config/sidecar.yaml
 # Node / TypeScript
 sdk/typescript/dist/
 sdk/typescript/node_modules/
+.env.local
+.venv/
