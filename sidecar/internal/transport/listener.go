@@ -6,10 +6,13 @@
 package transport
 
 import (
+	"encoding/json"
 	"log"
 	"net"
 
 	"github.com/acf-sdk/sidecar/internal/crypto"
+	"github.com/acf-sdk/sidecar/internal/pipeline"
+	"github.com/acf-sdk/sidecar/pkg/riskcontext"
 )
 
 // Config holds listener configuration.
@@ -106,8 +109,17 @@ func (l *Listener) handleConn(conn net.Conn) {
 		return
 	}
 
-	// 4. Phase 1: return a hardcoded ALLOW response.
-	//    Pipeline stages are wired in Phase 2.
+	// 4. Layer 1: normalise textual fields in the risk context payload (fast-path).
+	var rc riskcontext.RiskContext
+	if err := json.Unmarshal(rf.Payload, &rc); err != nil {
+		log.Printf("transport: invalid risk context JSON: %v", err)
+		return
+	}
+	rc.Payload = pipeline.NormaliseJSONValue(rc.Payload)
+
+	// 5. Phase 1: return a hardcoded ALLOW response.
+	//    Full pipeline (validate → normalise → scan → aggregate) is Phase 2+.
+	// rc.Payload is layer-1 normalised and ready for downstream stages.
 	resp := EncodeResponse(&ResponseFrame{Decision: DecisionAllow})
 	if _, err := conn.Write(resp); err != nil {
 		log.Printf("transport: write error: %v", err)

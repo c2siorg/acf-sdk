@@ -87,6 +87,33 @@ func TestListener_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestListener_InvalidJSONPayload(t *testing.T) {
+	_, signer, address := newTestListener(t)
+
+	payload := []byte(`not-valid-json`)
+	frame, err := EncodeRequest(payload, signer)
+	if err != nil {
+		t.Fatalf("EncodeRequest: %v", err)
+	}
+
+	conn, err := platformDial(address)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(2 * time.Second)) //nolint:errcheck
+
+	if _, err := conn.Write(frame); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	buf := make([]byte, 64)
+	n, _ := conn.Read(buf)
+	if n > 0 {
+		t.Errorf("expected no response on invalid JSON payload, got %d bytes", n)
+	}
+}
+
 func TestListener_BadHMAC(t *testing.T) {
 	_, signer, address := newTestListener(t)
 
