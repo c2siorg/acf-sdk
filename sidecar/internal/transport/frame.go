@@ -19,7 +19,9 @@ package transport
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/acf-sdk/sidecar/internal/crypto"
@@ -66,30 +68,53 @@ type ResponseFrame struct {
 
 // SignedMessage returns the byte slice that is the HMAC input:
 //
-//	version(1B) || length(4B big-endian) || nonce(16B) || payload
+//	version(1B) || length(4B big-endian) || nonce(16B) || canonical_payload
 //
+// The payload is canonicalized (JSON with sorted keys, no whitespace) before
+// being included in the signed message. This ensures cross-language consistency
+// across Python SDK and Go sidecar.
+//
+// Returns an error if the payload is not valid JSON.
 // Both the encoder and the verifier must call this to ensure they sign
 // and verify the same bytes.
-func SignedMessage(version byte, length uint32, nonce [16]byte, payload []byte) []byte {
-	buf := make([]byte, 1+4+16+len(payload))
+func SignedMessage(version byte, length uint32, nonce [16]byte, payload []byte) ([]byte, error) {
+	// Canonicalize payload: parse JSON and re-encode with sorted keys
+	var obj interface{}
+	if err := json.Unmarshal(payload, &obj); err != nil {
+		return nil, fmt.Errorf("payload is not valid JSON: %w", err)
+	}
+
+	// Re-encode with canonical form (sorted keys, compact)
+	canonical, err := json.Marshal(obj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to canonicalize payload: %w", err)
+	}
+
+	buf := make([]byte, 1+4+16+len(canonical))
 	buf[0] = version
-	binary.BigEndian.PutUint32(buf[1:5], length)
+	binary.BigEndian.PutUint32(buf[1:5], uint32(len(canonical)))
 	copy(buf[5:21], nonce[:])
-	copy(buf[21:], payload)
-	return buf
+	copy(buf[21:], canonical)
+	return buf, nil
 }
 
 // EncodeRequest encodes a signed request frame from a raw JSON payload.
-// It generates a fresh 16-byte nonce, computes the HMAC, and returns
-// the complete frame bytes (54-byte header + payload).
+// It canonicalizes the payload, generates a fresh 16-byte nonce, computes
+// the HMAC over the canonical form, and returns the complete frame bytes
+// (54-byte header + original payload).
+// Returns an error if the payload is not valid JSON.
 func EncodeRequest(payload []byte, s *crypto.Signer) ([]byte, error) {
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return nil, err
 	}
 
+	// Canonicalize for signing
 	length := uint32(len(payload))
-	msg := SignedMessage(VersionByte, length, nonce, payload)
+	msg, err := SignedMessage(VersionByte, length, nonce, payload)
+	if err != nil {
+		return nil, err
+	}
 	mac := s.Sign(msg)
 
 	frame := make([]byte, HeaderSize+len(payload))
