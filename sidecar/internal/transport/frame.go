@@ -19,7 +19,9 @@ package transport
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/acf-sdk/sidecar/internal/crypto"
@@ -64,38 +66,78 @@ type ResponseFrame struct {
 	SanitisedPayload []byte
 }
 
+// CanonicalizeJSON parses and re-encodes JSON to produce a canonical form:
+//   - Keys are sorted alphabetically (including nested objects)
+//   - No whitespace
+//   - Deterministic order for consistent cross-language serialization
+//
+// Returns an error if the input is not valid JSON.
+// Canonicalization is idempotent: canonical(canonical(x)) == canonical(x)
+func CanonicalizeJSON(payload []byte) ([]byte, error) {
+	var obj interface{}
+	if err := json.Unmarshal(payload, &obj); err != nil {
+		return nil, fmt.Errorf("payload is not valid JSON: %w", err)
+	}
+	canonical, err := json.Marshal(obj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to canonicalize payload: %w", err)
+	}
+	return canonical, nil
+}
+
 // SignedMessage returns the byte slice that is the HMAC input:
 //
-//	version(1B) || length(4B big-endian) || nonce(16B) || payload
+//	version(1B) || length(4B big-endian) || nonce(16B) || canonical_payload
 //
+// The payload is canonicalized (JSON with sorted keys, no whitespace) before
+// being included in the signed message. This ensures cross-language consistency
+// across Python SDK and Go sidecar. The length field is the byte length of the
+// canonical payload, not the original input.
+//
+// Returns an error if the payload is not valid JSON.
 // Both the encoder and the verifier must call this to ensure they sign
 // and verify the same bytes.
-func SignedMessage(version byte, length uint32, nonce [16]byte, payload []byte) []byte {
-	buf := make([]byte, 1+4+16+len(payload))
+func SignedMessage(version byte, nonce [16]byte, payload []byte) ([]byte, error) {
+	// Canonicalize payload: parse JSON and re-encode with sorted keys
+	canonical, err := CanonicalizeJSON(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build signed message: version || canonical_length || nonce || canonical_payload
+	buf := make([]byte, 1+4+16+len(canonical))
 	buf[0] = version
-	binary.BigEndian.PutUint32(buf[1:5], length)
+	binary.BigEndian.PutUint32(buf[1:5], uint32(len(canonical)))
 	copy(buf[5:21], nonce[:])
-	copy(buf[21:], payload)
-	return buf
+	copy(buf[21:], canonical)
+	return buf, nil
 }
 
 // EncodeRequest encodes a signed request frame from a raw JSON payload.
-// It generates a fresh 16-byte nonce, computes the HMAC, and returns
-// the complete frame bytes (54-byte header + payload).
+// It canonicalizes the payload, generates a fresh 16-byte nonce, computes
+// the HMAC over the canonical form using SignedMessage, and returns the
+// complete frame bytes (54-byte header + original payload).
+// The frame header length field represents the original payload length,
+// while the signed message contains the canonical payload length.
+// Returns an error if the payload is not valid JSON.
 func EncodeRequest(payload []byte, s *crypto.Signer) ([]byte, error) {
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return nil, err
 	}
 
-	length := uint32(len(payload))
-	msg := SignedMessage(VersionByte, length, nonce, payload)
+	// Create signed message with canonical payload and canonical length
+	msg, err := SignedMessage(VersionByte, nonce, payload)
+	if err != nil {
+		return nil, err
+	}
 	mac := s.Sign(msg)
 
+	// Frame header uses original payload length, frame includes original payload
 	frame := make([]byte, HeaderSize+len(payload))
 	frame[0] = MagicByte
 	frame[1] = VersionByte
-	binary.BigEndian.PutUint32(frame[2:6], length)
+	binary.BigEndian.PutUint32(frame[2:6], uint32(len(payload)))
 	copy(frame[6:22], nonce[:])
 	copy(frame[22:54], mac)
 	copy(frame[54:], payload)
