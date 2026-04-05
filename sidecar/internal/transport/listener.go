@@ -93,8 +93,7 @@ func (l *Listener) handleConn(conn net.Conn) {
 	}
 
 	// 2. Canonicalize and verify HMAC.
-	length := uint32(len(rf.Payload))
-	signedMsg, err := SignedMessage(rf.Version, length, rf.Nonce, rf.Payload)
+	signedMsg, err := SignedMessage(rf.Version, rf.Nonce, rf.Payload)
 	if err != nil {
 		log.Printf("transport: canonicalization failed: %v", err)
 		return

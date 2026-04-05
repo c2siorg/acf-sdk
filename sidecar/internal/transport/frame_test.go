@@ -162,9 +162,8 @@ func TestDecodeResponse_All(t *testing.T) {
 func TestSignedMessage_Composition(t *testing.T) {
 	nonce := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	payload := []byte(`{"key":"value"}`)
-	length := uint32(len(payload))
 
-	msg, err := SignedMessage(VersionByte, length, nonce, payload)
+	msg, err := SignedMessage(VersionByte, nonce, payload)
 	if err != nil {
 		t.Fatalf("SignedMessage: %v", err)
 	}
@@ -188,12 +187,12 @@ func TestSignedMessage_KeyOrderNormalization(t *testing.T) {
 	payload1 := []byte(`{"b":2,"a":1}`)
 	payload2 := []byte(`{"a":1,"b":2}`)
 
-	msg1, err1 := SignedMessage(VersionByte, uint32(len(payload1)), nonce, payload1)
+	msg1, err1 := SignedMessage(VersionByte, nonce, payload1)
 	if err1 != nil {
 		t.Fatalf("SignedMessage payload1: %v", err1)
 	}
 
-	msg2, err2 := SignedMessage(VersionByte, uint32(len(payload2)), nonce, payload2)
+	msg2, err2 := SignedMessage(VersionByte, nonce, payload2)
 	if err2 != nil {
 		t.Fatalf("SignedMessage payload2: %v", err2)
 	}
@@ -209,12 +208,12 @@ func TestSignedMessage_WhitespaceNormalization(t *testing.T) {
 	payload1 := []byte(`{"a": 1, "b": 2}`)
 	payload2 := []byte(`{"a":1,"b":2}`)
 
-	msg1, err1 := SignedMessage(VersionByte, uint32(len(payload1)), nonce, payload1)
+	msg1, err1 := SignedMessage(VersionByte, nonce, payload1)
 	if err1 != nil {
 		t.Fatalf("SignedMessage payload1: %v", err1)
 	}
 
-	msg2, err2 := SignedMessage(VersionByte, uint32(len(payload2)), nonce, payload2)
+	msg2, err2 := SignedMessage(VersionByte, nonce, payload2)
 	if err2 != nil {
 		t.Fatalf("SignedMessage payload2: %v", err2)
 	}
@@ -228,7 +227,7 @@ func TestSignedMessage_InvalidJSON(t *testing.T) {
 	nonce := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 	payload := []byte(`{invalid json`)
 
-	_, err := SignedMessage(VersionByte, 0, nonce, payload)
+	_, err := SignedMessage(VersionByte, nonce, payload)
 	if err == nil {
 		t.Error("SignedMessage should reject invalid JSON")
 	}
@@ -242,12 +241,12 @@ func TestSignedMessage_CrossLanguageConsistency(t *testing.T) {
 	pythonStyle := []byte(`{"a":1,"b":2}`)
 	goStyle := []byte(`{"b":2,"a":1}`)
 
-	msg1, err1 := SignedMessage(VersionByte, uint32(len(pythonStyle)), nonce, pythonStyle)
+	msg1, err1 := SignedMessage(VersionByte, nonce, pythonStyle)
 	if err1 != nil {
 		t.Fatalf("SignedMessage pythonStyle: %v", err1)
 	}
 
-	msg2, err2 := SignedMessage(VersionByte, uint32(len(goStyle)), nonce, goStyle)
+	msg2, err2 := SignedMessage(VersionByte, nonce, goStyle)
 	if err2 != nil {
 		t.Fatalf("SignedMessage goStyle: %v", err2)
 	}
