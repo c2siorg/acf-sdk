@@ -135,22 +135,51 @@ func TestCanonicalizeJSON_SpecialCharacters(t *testing.T) {
 	}
 }
 
+func TestCanonicalizeJSON_UnicodeNormalization(t *testing.T) {
+	// Go normalizes Unicode escape sequences during JSON marshal/unmarshal;
+	// this test ensures cross-SDK consistency. A Unicode escape sequence like
+	// \u0041 is normalized to its literal character representation "A" during
+	// canonicalization, ensuring both SDKs produce identical canonical forms.
+	
+	// Input payload with Unicode escape sequence
+	payload := []byte(`{"key":"\u0041"}`)
+	
+	canon, err := CanonicalizeJSON(payload)
+	if err != nil {
+		t.Fatalf("CanonicalizeJSON: %v", err)
+	}
+
+	// Expected: Unicode escape is normalized to the literal character
+	expected := []byte(`{"key":"A"}`)
+	
+	if !bytes.Equal(canon, expected) {
+		t.Fatalf("Unicode escape should be normalized: got %q, want %q",
+			string(canon), string(expected))
+	}
+
+	// Verify that repeated canonicalization produces the same result (idempotent)
+	canon2, _ := CanonicalizeJSON(canon)
+	if !bytes.Equal(canon, canon2) {
+		t.Fatalf("Unicode normalization should be idempotent")
+	}
+
+	// Verify that both forms (escaped vs literal) produce identical canonical output
+	payloadLiteral := []byte(`{"key":"A"}`)
+	canonLiteral, _ := CanonicalizeJSON(payloadLiteral)
+
+	if !bytes.Equal(canon, canonLiteral) {
+		t.Fatalf("escaped and literal Unicode should canonicalize identically")
+	}
+}
+
 // ============================================================================
 // PART B: Cross-SDK Interoperability Tests (Fixed Nonce)
 // ============================================================================
 
-// FixedNonceSignedMessage is a helper that creates a signed message with
-// a fixed nonce (useful for cross-SDK testing). This allows us to verify
-// that two different JSON representations of the same data produce identical
-// HMACs when using the same nonce.
-func FixedNonceSignedMessage(version byte, nonce [16]byte, payload []byte) ([]byte, error) {
-	return SignedMessage(version, nonce, payload)
-}
-
 // FixedNonceHMAC computes HMAC with a fixed nonce. Used to verify
 // cross-SDK determinism at the signed message level.
 func FixedNonceHMAC(signer *crypto.Signer, version byte, nonce [16]byte, payload []byte) ([]byte, error) {
-	msg, err := FixedNonceSignedMessage(version, nonce, payload)
+	msg, err := SignedMessage(version, nonce, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -188,8 +217,8 @@ func TestCrossSDK_IdenticalSignedMessage(t *testing.T) {
 	payload1 := []byte(`{"user":"alice","role":"admin"}`)
 	payload2 := []byte(`{"role":"admin","user":"alice"}`)
 
-	msg1, _ := FixedNonceSignedMessage(VersionByte, fixedNonce, payload1)
-	msg2, _ := FixedNonceSignedMessage(VersionByte, fixedNonce, payload2)
+	msg1, _ := SignedMessage(VersionByte, fixedNonce, payload1)
+	msg2, _ := SignedMessage(VersionByte, fixedNonce, payload2)
 
 	if !bytes.Equal(msg1, msg2) {
 		t.Error("cross-SDK: different key orders should produce identical signed messages")
@@ -397,24 +426,28 @@ func TestFrameHeader_CanonicalVsRaw(t *testing.T) {
 	canonical, _ := CanonicalizeJSON(payload)
 	expectedCanonical := uint32(len(canonical))
 
-	if headerLength == signedMsgCanonicalLength {
-		// They happen to be equal for this payload
-		t.Logf("raw payload length and canonical length both: %d",
-			headerLength)
-	} else {
-		// Whitespace was removed, so canonical is smaller
-		if headerLength > signedMsgCanonicalLength {
-			t.Logf("raw payload length (%d) > canonical length (%d) — whitespace removed",
-				headerLength, signedMsgCanonicalLength)
-		} else {
-			t.Logf("raw payload length (%d) < canonical length (%d) — keys were reordered",
-				headerLength, signedMsgCanonicalLength)
-		}
+	// INVARIANT 1: Frame header length must equal raw payload length
+	if headerLength != uint32(len(payload)) {
+		t.Fatalf("frame header length should be raw payload length (%d), got %d",
+			len(payload), headerLength)
 	}
 
+	// INVARIANT 2: Signed message length must equal canonical payload length
 	if signedMsgCanonicalLength != expectedCanonical {
-		t.Errorf("signed message canonical length mismatch: got %d, want %d",
-			signedMsgCanonicalLength, expectedCanonical)
+		t.Fatalf("signed message canonical length should be %d, got %d",
+			expectedCanonical, signedMsgCanonicalLength)
+	}
+
+	// INVARIANT 3: For this payload with whitespace, raw != canonical
+	if headerLength == signedMsgCanonicalLength {
+		t.Fatalf("payload contains whitespace; raw length (%d) should differ from canonical length (%d)",
+			headerLength, signedMsgCanonicalLength)
+	}
+
+	// Verify raw length > canonical length (whitespace was removed)
+	if headerLength <= signedMsgCanonicalLength {
+		t.Fatalf("raw payload length (%d) should be greater than canonical length (%d) due to whitespace removal",
+			headerLength, signedMsgCanonicalLength)
 	}
 }
 
