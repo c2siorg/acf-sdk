@@ -23,6 +23,7 @@ import (
 	"io"
 
 	"github.com/acf-sdk/sidecar/internal/crypto"
+	"github.com/acf-sdk/sidecar/pkg/decision"
 )
 
 const (
@@ -34,11 +35,11 @@ const (
 	HeaderSize = 54 // 1 + 1 + 4 + 16 + 32
 
 	// DecisionAllow is the response byte for an ALLOW decision.
-	DecisionAllow = byte(0x00)
+	DecisionAllow = decision.Allow
 	// DecisionSanitise is the response byte for a SANITISE decision.
-	DecisionSanitise = byte(0x01)
+	DecisionSanitise = decision.Sanitise
 	// DecisionBlock is the response byte for a BLOCK decision.
-	DecisionBlock = byte(0x02)
+	DecisionBlock = decision.Block
 )
 
 // Sentinel errors returned by frame decode functions.

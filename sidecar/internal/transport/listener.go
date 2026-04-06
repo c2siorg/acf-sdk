@@ -1,15 +1,18 @@
 // listener.go — IPC accept loop.
 // Accepts connections from the platform Connector (UDS on Linux/macOS,
 // named pipe on Windows). Spawns one goroutine per connection.
-// Each connection: read frame → verify HMAC → check nonce → write response.
+// Each connection: read frame → verify HMAC → check nonce → run pipeline → write response.
 // Invalid HMAC or reused nonce drops the connection immediately with no response.
 package transport
 
 import (
+	"encoding/json"
 	"log"
 	"net"
 
 	"github.com/acf-sdk/sidecar/internal/crypto"
+	"github.com/acf-sdk/sidecar/internal/pipeline"
+	"github.com/acf-sdk/sidecar/pkg/riskcontext"
 )
 
 // Config holds listener configuration.
@@ -20,6 +23,9 @@ type Config struct {
 	Connector  Connector
 	Signer     *crypto.Signer
 	NonceStore *crypto.NonceStore
+	// Pipeline is the enforcement pipeline. If nil, a hardcoded ALLOW is returned
+	// (Phase 1 fallback — should not be nil in Phase 2+).
+	Pipeline *pipeline.Pipeline
 }
 
 // Listener wraps a platform net.Listener and handles incoming connections.
@@ -106,9 +112,24 @@ func (l *Listener) handleConn(conn net.Conn) {
 		return
 	}
 
-	// 4. Phase 1: return a hardcoded ALLOW response.
-	//    Pipeline stages are wired in Phase 2.
-	resp := EncodeResponse(&ResponseFrame{Decision: DecisionAllow})
+	// 4. Run pipeline if configured; fall back to ALLOW if not (Phase 1 compat).
+	decision := DecisionAllow
+	if l.cfg.Pipeline != nil {
+		var rc riskcontext.RiskContext
+		if err := json.Unmarshal(rf.Payload, &rc); err != nil {
+			log.Printf("transport: JSON unmarshal error: %v", err)
+			resp := EncodeResponse(&ResponseFrame{Decision: DecisionBlock})
+			conn.Write(resp) //nolint:errcheck
+			return
+		}
+		result := l.cfg.Pipeline.Run(&rc)
+		decision = result.Decision
+		log.Printf("transport: session=%s hook=%s score=%.2f signals=%v decision=%d blocked_at=%s",
+			rc.SessionID, rc.HookType, result.Score, result.Signals, decision, result.BlockedAt)
+	}
+
+	// 5. Write response.
+	resp := EncodeResponse(&ResponseFrame{Decision: decision})
 	if _, err := conn.Write(resp); err != nil {
 		log.Printf("transport: write error: %v", err)
 	}

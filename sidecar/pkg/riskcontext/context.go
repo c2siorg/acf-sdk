@@ -31,6 +31,12 @@ type RiskContext struct {
 	// on_memory) or an object (on_tool_call, on_context chunk).
 	Payload any `json:"payload"`
 
+	// CanonicalText is the normalised form of Payload produced by the normalise
+	// stage. It is the text the scan stage operates on. The original Payload is
+	// never mutated — CanonicalText is a separate derived field.
+	// Not serialised to JSON; internal to the sidecar pipeline only.
+	CanonicalText string `json:"-"`
+
 	// State is nil in v1. In v2 it is hydrated by the TTL state store before
 	// the pipeline runs and contains session history for stateful policies.
 	State any `json:"state"`

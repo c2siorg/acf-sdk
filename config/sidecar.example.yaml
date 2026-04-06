@@ -12,11 +12,48 @@ policy_dir: ./policies/v1         # directory containing Rego files and data/
 
 log_level: info                   # debug | info | warn | error
 
-otel:
-  enabled: false                  # set true to emit OTel spans
-  endpoint: ""                    # e.g. http://localhost:4318/v1/traces (OTLP HTTP)
-  service_name: acf-sidecar
+pipeline:
+  strict_mode: true               # false = run all stages even on hard block signals
+                                  # Use false for debugging, auditing, or policy development.
+
+thresholds:
+  block_score: 0.85               # risk score >= this → BLOCK (pre-OPA hard gate)
+  sanitise_score: 0.50            # risk score >= this → SANITISE (OPA refines in Phase 3)
+
+trust_weights:                    # provenance multiplier applied to the raw signal score
+  user_input: 1.0                 # highest — direct prompt injection risk
+  user: 1.0
+  tool_output: 0.8
+  rag_chunk: 0.7
+  rag: 0.7
+  memory_read: 0.6
+  memory: 0.6
+
+tool_allowlist: []                # populate with permitted tool names; empty = allow all
+                                  # e.g. ["search", "calculator", "read_file"]
+
+memory_key_allowlist: []          # populate with permitted memory keys; empty = allow all
+
+signal_weights:                   # per-signal contribution to risk score (0.0–1.0)
+  jailbreak_pattern: 0.9          # Aho-Corasick pattern match from jailbreak_patterns.json
+  instruction_override: 0.85      # prompt attempts to override system instructions
+  role_escalation: 0.8            # attempts to change model role/persona
+  shell_metachar: 0.75            # shell metacharacters in tool parameters
+  path_traversal: 0.75            # ../ or absolute paths in tool parameters
+  embedded_instruction: 0.65      # instruction-like text in RAG/context chunks
+  structural_anomaly: 0.40        # unusual payload structure
+  hmac_invalid: 1.0               # always hard block
+  tool:not_allowed: 0.9           # tool name not in allowlist
+  memory:key_not_allowed: 0.7     # memory key not in allowlist
+  validate:invalid_hook_type: 1.0 # unknown hook type — always block
+  validate:missing_provenance: 0.9
+  validate:nil_payload: 1.0
 
 # HMAC key is loaded from the ACF_HMAC_KEY environment variable at startup.
 # Minimum 32 bytes, hex-encoded.
 # Generate: python3 -c "import secrets; print(secrets.token_hex(32))"
+
+otel:
+  enabled: false                  # set true to emit OTel spans (Phase 4)
+  endpoint: ""                    # e.g. http://localhost:4318/v1/traces (OTLP HTTP)
+  service_name: acf-sidecar

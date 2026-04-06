@@ -1,8 +1,6 @@
 // main.go — sidecar entrypoint.
-// Phase 1: loads the HMAC key, starts the nonce store, and starts the
+// Phase 2: loads config, builds the enforcement pipeline, and starts the
 // IPC listener (UDS on Linux/macOS, named pipe on Windows).
-// Returns a hardcoded ALLOW for every valid request.
-// Pipeline stages are wired in Phase 2.
 package main
 
 import (
@@ -12,12 +10,20 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/acf-sdk/sidecar/internal/config"
 	"github.com/acf-sdk/sidecar/internal/crypto"
+	"github.com/acf-sdk/sidecar/internal/pipeline"
 	"github.com/acf-sdk/sidecar/internal/transport"
 )
 
 func main() {
-	// 1. Load HMAC key from environment.
+	// 1. Load sidecar config (falls back to defaults if sidecar.yaml absent).
+	cfg, err := config.LoadOrDefault("config/sidecar.yaml")
+	if err != nil {
+		log.Fatalf("sidecar: config error: %v", err)
+	}
+
+	// 2. Load HMAC key from environment.
 	signer, err := crypto.NewSignerFromEnv()
 	if err != nil {
 		log.Fatalf("sidecar: failed to load HMAC key: %v\n"+
@@ -25,31 +31,55 @@ func main() {
 			"  Generate: python3 -c \"import secrets; print(secrets.token_hex(32))\"", err)
 	}
 
-	// 2. Start nonce store with 5-minute TTL.
+	// 3. Start nonce store with 5-minute TTL.
 	nonceStore := crypto.NewNonceStore(5 * time.Minute)
 	defer nonceStore.Stop()
 
-	// 3. Resolve IPC address (platform-specific default if unset).
+	// 4. Load jailbreak patterns.
+	patterns, err := config.LoadPatterns(cfg.PolicyDir)
+	if err != nil {
+		log.Printf("sidecar: warning — could not load jailbreak patterns: %v (scan stage will run with no patterns)", err)
+		patterns = &config.Patterns{}
+	}
+
+	// 5. Build the enforcement pipeline.
+	pl := pipeline.New(cfg, []pipeline.Stage{
+		pipeline.NewValidateStage(),
+		pipeline.NewNormaliseStage(),
+		pipeline.NewScanStage(cfg, patterns.Patterns),
+		pipeline.NewAggregateStage(cfg),
+	})
+
+	mode := "strict"
+	if !cfg.Pipeline.StrictMode {
+		mode = "non-strict"
+	}
+	log.Printf("sidecar: pipeline ready (mode=%s, block_threshold=%.2f)", mode, cfg.Thresholds.BlockScore)
+
+	// 6. Resolve IPC address (platform-specific default if unset).
 	connector := transport.DefaultConnector()
 	address := connector.DefaultAddress()
 	if p := os.Getenv("ACF_SOCKET_PATH"); p != "" {
 		address = p
+	} else if cfg.SocketPath != "" {
+		address = cfg.SocketPath
 	}
 
-	// 4. Create and start listener.
+	// 7. Create and start listener.
 	ln, err := transport.NewListener(transport.Config{
 		Address:    address,
 		Connector:  connector,
 		Signer:     signer,
 		NonceStore: nonceStore,
+		Pipeline:   pl,
 	})
 	if err != nil {
 		log.Fatalf("sidecar: failed to create listener on %s: %v", address, err)
 	}
 
-	log.Printf("sidecar: listening on %s (phase 1 — hardcoded ALLOW)", address)
+	log.Printf("sidecar: listening on %s", address)
 
-	// 5. Serve in background; block on shutdown signal.
+	// 8. Serve in background; block on shutdown signal.
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- ln.Serve() }()
 
