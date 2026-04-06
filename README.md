@@ -5,7 +5,7 @@
 
 A Zero Trust security layer for LLM agents. Enforces policy-driven validation at every point an agent ingests input — not just at the front door.
 
-> **Status: Phase 1 complete — wire protocol and crypto. Phase 2 (pipeline stages) next.**
+> **Status: Phase 2 complete — pipeline stages running. Phase 3 (OPA policy engine) next.**
 
 ---
 
@@ -163,7 +163,8 @@ Keep this value — both the sidecar and the SDK must use the same key.
 ```bash
 cd sidecar && go build -o ../bin/acf-sidecar ./cmd/sidecar
 ./bin/acf-sidecar
-# sidecar: listening on /tmp/acf.sock (phase 1 — hardcoded ALLOW)
+# sidecar: pipeline ready (mode=strict, block_threshold=0.85)
+# sidecar: listening on /tmp/acf.sock
 ```
 
 Or with `make`:
@@ -194,7 +195,7 @@ print("Round-trip OK:", result)
 
 ```bash
 # Go unit tests
-cd sidecar && go test ./internal/crypto/... ./internal/transport/... -v
+cd sidecar && go test ./... -v
 
 # Python unit tests
 cd sdk/python && python -m pytest -v
@@ -237,8 +238,8 @@ acf-sdk/
 | Phase | Goal | Status |
 |---|---|---|
 | 1 | Wire protocol + HMAC/nonce crypto | **Complete** — 23 Go tests, 35 Python tests |
-| 2 | Pipeline stages (validate/normalise/scan/aggregate) | Next |
-| 3 | OPA integration + Rego policies | Pending |
+| 2 | Pipeline stages (validate/normalise/scan/aggregate) | **Complete** — 49 Go tests |
+| 3 | OPA integration + Rego policies | Next |
 | 4 | OTel observability + integration test suite | Pending |
 | v2 | Stateful session risk, additional hooks, TypeScript SDK | Deferred |
 
@@ -259,7 +260,9 @@ See [PHILOSOPHY.md](PHILOSOPHY.md) for the full design rationale. The short vers
 ## Documentation
 
 - [Architecture](docs/architecture.md) — full system design, IPC wire protocol, pipeline stages
-- [Phase 1](docs/phase1.md) — what was built, test coverage, how to run
+- [Phase 1](docs/phase1.md) — wire protocol and crypto implementation
+- [Phase 2](docs/phase2.md) — pipeline stages, strict_mode switch, scoring
+- [Crypto](docs/crypto.md) — HMAC signing and nonce replay protection
 - [Policy authoring](docs/policy-authoring.md) — how to write and test Rego policies
 - [Philosophy](PHILOSOPHY.md) — design principles and threat model rationale
 
