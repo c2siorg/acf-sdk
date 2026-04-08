@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -77,6 +78,10 @@ func Load(path string) (*Config, error) {
 	if err := validate(cfg); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
+
+	// Resolve relative paths from the config file location so the runtime
+	// behaves the same regardless of the process working directory.
+	cfg.PolicyDir = resolveRelative(filepath.Dir(path), cfg.PolicyDir)
 
 	return cfg, nil
 }
@@ -196,4 +201,75 @@ func LoadPatterns(policyDir string) (*Patterns, error) {
 		return nil, fmt.Errorf("config: cannot parse patterns file: %w", err)
 	}
 	return &p, nil
+}
+
+// DefaultConfigPath returns the standard config path for the project that
+// contains startDir. If no project root is found, it falls back to startDir.
+func DefaultConfigPath(startDir string) string {
+	base := startDir
+	if root, err := FindProjectRoot(startDir); err == nil {
+		base = root
+	}
+	return filepath.Join(base, "config", "sidecar.yaml")
+}
+
+// ResolvePolicyDir normalises a runtime policy directory. Relative paths are
+// anchored to the loaded config file when present, otherwise to the project
+// root inferred from startDir.
+func ResolvePolicyDir(policyDir, configPath, startDir string) string {
+	if policyDir == "" || filepath.IsAbs(policyDir) {
+		return filepath.Clean(policyDir)
+	}
+
+	if configPath != "" {
+		if info, err := os.Stat(configPath); err == nil && !info.IsDir() {
+			return resolveRelative(filepath.Dir(configPath), policyDir)
+		}
+	}
+
+	if root, err := FindProjectRoot(startDir); err == nil {
+		return resolveRelative(root, policyDir)
+	}
+
+	return filepath.Clean(policyDir)
+}
+
+// FindProjectRoot walks up from startDir until it finds the repo markers.
+func FindProjectRoot(startDir string) (string, error) {
+	dir, err := filepath.Abs(startDir)
+	if err != nil {
+		return "", fmt.Errorf("config: resolve project root: %w", err)
+	}
+
+	for {
+		if hasProjectMarkers(dir) {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", errors.New("project root not found")
+		}
+		dir = parent
+	}
+}
+
+func hasProjectMarkers(dir string) bool {
+	markers := []string{
+		filepath.Join(dir, "config", "sidecar.example.yaml"),
+		filepath.Join(dir, "sidecar", "go.mod"),
+	}
+	for _, marker := range markers {
+		info, err := os.Stat(marker)
+		if err != nil || info.IsDir() {
+			return false
+		}
+	}
+	return true
+}
+
+func resolveRelative(baseDir, path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(filepath.Join(baseDir, path))
 }
