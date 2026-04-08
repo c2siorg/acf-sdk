@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -178,22 +179,54 @@ func validate(c *Config) error {
 	return nil
 }
 
-// Patterns is the shape of jailbreak_patterns.json.
+// Patterns holds the parsed jailbreak patterns for the scanner.
 type Patterns struct {
-	Version  string   `json:"_version"`
-	Patterns []string `json:"patterns"`
+	Version  string
+	Patterns []string
 }
 
 // LoadPatterns reads and parses jailbreak_patterns.json from policyDir.
+// Supports both structured entries (objects with a "pattern" field) and
+// flat string arrays for backward compatibility.
 func LoadPatterns(policyDir string) (*Patterns, error) {
 	path := policyDir + "/data/jailbreak_patterns.json"
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: cannot read patterns file %s: %w", path, err)
 	}
-	var p Patterns
-	if err := json.Unmarshal(data, &p); err != nil {
+
+	var raw struct {
+		Version  string            `json:"_version"`
+		Patterns []json.RawMessage `json:"patterns"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("config: cannot parse patterns file: %w", err)
 	}
-	return &p, nil
+
+	strs := make([]string, 0, len(raw.Patterns))
+	skipped := 0
+	for i, p := range raw.Patterns {
+		// Try structured entry first ({"pattern": "...", ...})
+		var entry struct {
+			Pattern string `json:"pattern"`
+		}
+		if err := json.Unmarshal(p, &entry); err == nil && entry.Pattern != "" {
+			strs = append(strs, entry.Pattern)
+			continue
+		}
+		// Fall back to plain string
+		var s string
+		if err := json.Unmarshal(p, &s); err == nil && s != "" {
+			strs = append(strs, s)
+			continue
+		}
+		log.Printf("config: warning: skipping unparseable pattern at index %d in %s", i, path)
+		skipped++
+	}
+
+	if skipped > 0 {
+		log.Printf("config: warning: %d of %d pattern entries could not be parsed", skipped, len(raw.Patterns))
+	}
+
+	return &Patterns{Version: raw.Version, Patterns: strs}, nil
 }
