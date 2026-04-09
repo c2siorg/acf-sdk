@@ -33,6 +33,10 @@ const (
 	VersionByte = byte(0x01)
 	// HeaderSize is the fixed size of the request frame header in bytes.
 	HeaderSize = 54 // 1 + 1 + 4 + 16 + 32
+	// MaxPayloadSize caps inbound payload size before any allocation or read of
+	// the untrusted body. This keeps malformed clients from forcing large
+	// pre-auth allocations before HMAC verification runs.
+	MaxPayloadSize = 4 << 20 // 4 MiB
 
 	// DecisionAllow is the response byte for an ALLOW decision.
 	DecisionAllow = decision.Allow
@@ -44,10 +48,11 @@ const (
 
 // Sentinel errors returned by frame decode functions.
 var (
-	ErrBadMagic    = errors.New("transport: bad magic byte")
-	ErrBadVersion  = errors.New("transport: unsupported protocol version")
-	ErrBadHMAC     = errors.New("transport: HMAC verification failed")
-	ErrReplayNonce = errors.New("transport: nonce replay detected")
+	ErrBadMagic        = errors.New("transport: bad magic byte")
+	ErrBadVersion      = errors.New("transport: unsupported protocol version")
+	ErrBadHMAC         = errors.New("transport: HMAC verification failed")
+	ErrReplayNonce     = errors.New("transport: nonce replay detected")
+	ErrPayloadTooLarge = errors.New("transport: payload exceeds maximum size")
 )
 
 // RequestFrame holds the decoded fields of an inbound request frame.
@@ -120,6 +125,9 @@ func DecodeRequest(r io.Reader) (*RequestFrame, error) {
 	}
 
 	length := binary.BigEndian.Uint32(header[2:6])
+	if length > MaxPayloadSize {
+		return nil, ErrPayloadTooLarge
+	}
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(r, payload); err != nil {
 		return nil, err

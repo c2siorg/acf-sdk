@@ -51,7 +51,9 @@ func New(cfg *config.Config, stages []Stage) *Pipeline {
 
 // Run executes all pipeline stages against rc and returns a Result.
 // In strict mode, the first hard block short-circuits execution.
-// In non-strict mode, all stages run and the final decision is taken after aggregate.
+// In non-strict mode, all stages run and the final decision is still BLOCK if
+// any stage hard-blocked. Non-strict mode collects more context; it does not
+// weaken fail-closed validation semantics.
 func (p *Pipeline) Run(rc *riskcontext.RiskContext) Result {
 	var blockedAt string
 
@@ -70,6 +72,15 @@ func (p *Pipeline) Run(rc *riskcontext.RiskContext) Result {
 			if blockedAt == "" {
 				blockedAt = s.Name()
 			}
+		}
+	}
+
+	if blockedAt != "" {
+		return Result{
+			Decision:  decision.Block,
+			Score:     rc.Score,
+			Signals:   rc.Signals,
+			BlockedAt: blockedAt,
 		}
 	}
 

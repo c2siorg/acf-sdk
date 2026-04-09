@@ -102,6 +102,35 @@ func TestDecodeRequest_Truncated(t *testing.T) {
 	}
 }
 
+func TestDecodeRequest_PayloadTooLarge(t *testing.T) {
+	frame := make([]byte, HeaderSize)
+	frame[0] = MagicByte
+	frame[1] = VersionByte
+	binary.BigEndian.PutUint32(frame[2:6], MaxPayloadSize+1)
+
+	_, err := DecodeRequest(bytes.NewReader(frame))
+	if err != ErrPayloadTooLarge {
+		t.Errorf("expected ErrPayloadTooLarge, got %v", err)
+	}
+}
+
+func TestDecodeRequest_MaxPayloadBoundary(t *testing.T) {
+	payload := bytes.Repeat([]byte("a"), MaxPayloadSize)
+	frame := make([]byte, HeaderSize+len(payload))
+	frame[0] = MagicByte
+	frame[1] = VersionByte
+	binary.BigEndian.PutUint32(frame[2:6], uint32(len(payload)))
+	copy(frame[HeaderSize:], payload)
+
+	rf, err := DecodeRequest(bytes.NewReader(frame))
+	if err != nil {
+		t.Fatalf("DecodeRequest: %v", err)
+	}
+	if len(rf.Payload) != len(payload) {
+		t.Errorf("payload length: got %d, want %d", len(rf.Payload), len(payload))
+	}
+}
+
 func TestEncodeResponse_Allow(t *testing.T) {
 	resp := &ResponseFrame{Decision: DecisionAllow}
 	buf := EncodeResponse(resp)
