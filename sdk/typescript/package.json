@@ -6,13 +6,13 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "test": "node --test tests/"
+    "test": "npm run build && node --test dist/tests/*.test.js"
   },
   "engines": {
     "node": ">=18"
   },
-  "dependencies": {},
   "devDependencies": {
-    "typescript": "^5.4.0"
+    "@types/node": "^25.5.2",
+    "typescript": "^5.9.3"
   }
 }
