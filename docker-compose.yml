@@ -1,20 +1,9 @@
-services:
+﻿services:
   sidecar:
-    build:
+    build: 
       context: ./sidecar
-      dockerfile: Dockerfile
     volumes:
-      - ./policies:/policies:ro
       - ./config/sidecar.yaml:/config/sidecar.yaml:ro
-      - /tmp:/tmp                  # shared UDS socket
+      - ./policies:/policies:ro
     environment:
-      ACF_HMAC_KEY: ""             # set in .env or shell before running
-    restart: unless-stopped
-
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
-    ports:
-      - "4318:4318"                # OTLP HTTP
-    volumes:
-      - ./config/otel-collector.yaml:/etc/otelcol/config.yaml:ro
-    profiles: ["observability"]    # opt-in: docker compose --profile observability up
+      - ACF_HMAC_KEY=${ACF_HMAC_KEY}
