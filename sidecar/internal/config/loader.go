@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -91,6 +92,7 @@ func Load(path string) (*Config, error) {
 func LoadOrDefault(path string) (*Config, error) {
 	cfg, err := Load(path)
 	if errors.Is(err, os.ErrNotExist) {
+		log.Printf("config: %s not found, using built-in defaults", path)
 		return defaults(), nil
 	}
 	return cfg, err
@@ -255,16 +257,15 @@ func FindProjectRoot(startDir string) (string, error) {
 
 func hasProjectMarkers(dir string) bool {
 	markers := []string{
-		filepath.Join(dir, "config", "sidecar.example.yaml"),
 		filepath.Join(dir, "sidecar", "go.mod"),
+		filepath.Join(dir, ".git"),
 	}
 	for _, marker := range markers {
-		info, err := os.Stat(marker)
-		if err != nil || info.IsDir() {
-			return false
+		if _, err := os.Stat(marker); err == nil {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func resolveRelative(baseDir, path string) string {
