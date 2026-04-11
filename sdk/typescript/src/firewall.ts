@@ -16,11 +16,49 @@ import {
 import { type ResponseFrame } from "./frame.js"
 import { Transport } from "./transport.js"
 
+type HookType = "on_prompt" | "on_context" | "on_tool_call" | "on_memory"
+type Provenance = "user" | "rag" | "agent"
+
+interface RiskContext {
+    score: number
+    signals: string[]
+    provenance: Provenance
+    session_id: string
+    hook_type: HookType
+    payload: unknown
+    state: null
+}
+
 type TransportLike = {
     send(payload: Buffer): Promise<ResponseFrame>
 }
 
 type TransportFactory = (socketPath?: string, key?: Buffer) => TransportLike
+
+function resolveKey(inputKey?: Buffer): Buffer {
+    if (inputKey) {
+        return Buffer.from(inputKey)
+    }
+
+    const raw = process.env.ACF_HMAC_KEY || ""
+    if (raw.length === 0) {
+        throw new FirewallError(
+            "No HMAC key provided. Pass hmacKey or set ACF_HMAC_KEY (hex-encoded).",
+        )
+    }
+
+    if (raw.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(raw)) {
+        throw new FirewallError("ACF_HMAC_KEY is not valid hex")
+    }
+
+    return Buffer.from(raw, "hex")
+}
+
+function isSanitiseResult(
+    value: Decision | SanitiseResult,
+): value is SanitiseResult {
+    return typeof value === "object" && value !== null
+}
 
 export class Firewall {
     private readonly transport: TransportLike
@@ -30,7 +68,7 @@ export class Firewall {
         hmacKey?: Buffer,
         transportFactory: TransportFactory = (path, key) => new Transport(path, key),
     ) {
-        const key = this.resolveKey(hmacKey)
+        const key = resolveKey(hmacKey)
         this.transport = transportFactory(socketPath, key)
     }
 
@@ -54,7 +92,7 @@ export class Firewall {
             }
             const payload = this.buildPayload("on_context", chunk, "rag")
             const decision = await this.send(payload)
-            if (typeof decision === "object") {
+            if (isSanitiseResult(decision)) {
                 out.push({
                     original: chunk,
                     decision: Decision.SANITISE,
@@ -108,32 +146,13 @@ export class Firewall {
         return this.send(payload)
     }
 
-    private resolveKey(inputKey?: Buffer): Buffer {
-        if (inputKey) {
-            return Buffer.from(inputKey)
-        }
-
-        const raw = process.env.ACF_HMAC_KEY || ""
-        if (raw.length === 0) {
-            throw new FirewallError(
-                "No HMAC key provided. Pass hmacKey or set ACF_HMAC_KEY (hex-encoded).",
-            )
-        }
-
-        if (raw.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(raw)) {
-            throw new FirewallError("ACF_HMAC_KEY is not valid hex")
-        }
-
-        return Buffer.from(raw, "hex")
-    }
-
     private buildPayload(
-        hookType: string,
+        hookType: HookType,
         content: unknown,
-        provenance: string,
+        provenance: Provenance,
         sessionId: string = "",
     ): Buffer {
-        const ctx = {
+        const ctx: RiskContext = {
             score: 0.0,
             signals: [],
             provenance,

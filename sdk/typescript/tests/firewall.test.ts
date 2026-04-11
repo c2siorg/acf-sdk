@@ -170,6 +170,26 @@ describe("Firewall hook payloads and decisions", () => {
         })
     })
 
+    it("onMemory includes explicit op when provided", async () => {
+        const { capture, factory } = makeFactory([
+            async () => ({ decision: 0x00, sanitisedPayload: Buffer.alloc(0) }),
+        ])
+        const fw = new Firewall(
+            undefined,
+            Buffer.from("0011223344556677", "hex"),
+            factory,
+        )
+
+        await fw.onMemory("pref", "dark", "read")
+
+        const payload = JSON.parse(capture.transport.seenPayloads[0].toString("utf-8"))
+        assert.deepStrictEqual(payload.payload, {
+            key: "pref",
+            value: "dark",
+            op: "read",
+        })
+    })
+
     it("maps SANITISE response to SanitiseResult", async () => {
         const body = Buffer.from("safe content")
         const { factory } = makeFactory([
@@ -242,6 +262,28 @@ describe("Firewall onContext behavior", () => {
         assert.strictEqual(result[1].sanitisedText, "cleaned")
         assert.strictEqual(result[2].decision, Decision.BLOCK)
         assert.strictEqual(result[2].sanitisedText, null)
+    })
+
+    it("sends on_context payload with rag provenance per chunk", async () => {
+        const { capture, factory } = makeFactory([
+            async () => ({ decision: 0x00, sanitisedPayload: Buffer.alloc(0) }),
+            async () => ({ decision: 0x00, sanitisedPayload: Buffer.alloc(0) }),
+        ])
+        const fw = new Firewall(
+            undefined,
+            Buffer.from("0011223344556677", "hex"),
+            factory,
+        )
+
+        await fw.onContext(["chunk one", "chunk two"])
+
+        assert.strictEqual(capture.transport.seenPayloads.length, 2)
+        const first = JSON.parse(capture.transport.seenPayloads[0].toString("utf-8"))
+        const second = JSON.parse(capture.transport.seenPayloads[1].toString("utf-8"))
+        assert.strictEqual(first.hook_type, "on_context")
+        assert.strictEqual(first.provenance, "rag")
+        assert.strictEqual(first.payload, "chunk one")
+        assert.strictEqual(second.payload, "chunk two")
     })
 })
 
@@ -319,5 +361,56 @@ describe("Firewall error propagation and validation", () => {
             () => fw.onMemory(123 as unknown as string, "x"),
             FirewallError,
         )
+    })
+})
+
+describe("Firewall edge cases", () => {
+    it("supports unicode text payload", async () => {
+        const { capture, factory } = makeFactory([
+            async () => ({ decision: 0x00, sanitisedPayload: Buffer.alloc(0) }),
+        ])
+        const fw = new Firewall(
+            undefined,
+            Buffer.from("0011223344556677", "hex"),
+            factory,
+        )
+
+        await fw.onPrompt("こんにちは世界")
+        const payload = JSON.parse(capture.transport.seenPayloads[0].toString("utf-8"))
+        assert.strictEqual(payload.payload, "こんにちは世界")
+    })
+
+    it("multiple sequential calls are independent", async () => {
+        const { capture, factory } = makeFactory([
+            async () => ({ decision: 0x00, sanitisedPayload: Buffer.alloc(0) }),
+            async () => ({ decision: 0x02, sanitisedPayload: Buffer.alloc(0) }),
+        ])
+        const fw = new Firewall(
+            undefined,
+            Buffer.from("0011223344556677", "hex"),
+            factory,
+        )
+
+        const r1 = await fw.onPrompt("first")
+        const r2 = await fw.onPrompt("second")
+        assert.strictEqual(r1, Decision.ALLOW)
+        assert.strictEqual(r2, Decision.BLOCK)
+        assert.strictEqual(capture.transport.seenPayloads.length, 2)
+    })
+
+    it("does not mutate input params object", async () => {
+        const { factory } = makeFactory([
+            async () => ({ decision: 0x00, sanitisedPayload: Buffer.alloc(0) }),
+        ])
+        const fw = new Firewall(
+            undefined,
+            Buffer.from("0011223344556677", "hex"),
+            factory,
+        )
+
+        const params = { q: "test" }
+        const before = JSON.stringify(params)
+        await fw.onToolCall("search", params)
+        assert.strictEqual(JSON.stringify(params), before)
     })
 })

@@ -6,7 +6,9 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node --test dist/tests/*.test.js"
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "test:e2e": "npm run build && node --test dist/tests/integration.e2e.js",
+    "test:parity": "npm run build && node --test dist/tests/parity.e2e.js"
   },
   "engines": {
     "node": ">=18"
