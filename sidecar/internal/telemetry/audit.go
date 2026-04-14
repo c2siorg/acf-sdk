@@ -43,12 +43,18 @@ func (NopSink) Emit(AuditEntry) {}
 func (NopSink) Close() error    { return nil }
 func (NopSink) Dropped() uint64 { return 0 }
 
+// asyncJSONSink drains entries onto an io.Writer in a background goroutine.
+// The state mutex protects the closed flag and the channel close, so Emit
+// can never race a Close into sending on a closed channel.
 type asyncJSONSink struct {
-	w        io.Writer
-	ch       chan AuditEntry
-	wg       sync.WaitGroup
-	dropped  atomic.Uint64
-	closed   atomic.Bool
+	w       io.Writer
+	ch      chan AuditEntry
+	wg      sync.WaitGroup
+	dropped atomic.Uint64
+
+	mu     sync.RWMutex
+	closed bool
+
 	writeMu  sync.Mutex
 	errOnce  sync.Once
 	writeErr error
@@ -71,7 +77,9 @@ func NewAsyncSink(w io.Writer, buffer int) AuditSink {
 }
 
 func (s *asyncJSONSink) Emit(e AuditEntry) {
-	if s.closed.Load() {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
 		return
 	}
 	select {
@@ -82,10 +90,14 @@ func (s *asyncJSONSink) Emit(e AuditEntry) {
 }
 
 func (s *asyncJSONSink) Close() error {
-	if !s.closed.CompareAndSwap(false, true) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
 		return s.writeErr
 	}
+	s.closed = true
 	close(s.ch)
+	s.mu.Unlock()
 	s.wg.Wait()
 	return s.writeErr
 }
