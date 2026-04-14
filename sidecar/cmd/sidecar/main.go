@@ -152,8 +152,10 @@ func main() {
 
 	// audit.Close drains the buffered channel via a blocking io.Writer, so a
 	// stalled filesystem or backpressured stdout could otherwise wedge
-	// shutdown. Bound the wait and log on timeout; the worker goroutine
-	// dies with the process.
+	// shutdown. Bound the wait and log on timeout. On timeout we do not
+	// close the underlying file because the drain goroutine may still be
+	// mid-write; closing underneath it would truncate the final entries.
+	// The OS reclaims the fd when the process exits.
 	auditCtx, auditCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer auditCancel()
 	auditDone := make(chan error, 1)
@@ -163,14 +165,13 @@ func main() {
 		if err != nil {
 			log.Printf("sidecar: audit close: %v", err)
 		}
-	case <-auditCtx.Done():
-		log.Printf("sidecar: audit close timed out, last entries may be lost")
-	}
-
-	if closeAuditFile != nil {
-		if err := closeAuditFile(); err != nil {
-			log.Printf("sidecar: audit file close: %v", err)
+		if closeAuditFile != nil {
+			if err := closeAuditFile(); err != nil {
+				log.Printf("sidecar: audit file close: %v", err)
+			}
 		}
+	case <-auditCtx.Done():
+		log.Printf("sidecar: audit close timed out, last entries may be lost; leaving fd to process exit")
 	}
 }
 
