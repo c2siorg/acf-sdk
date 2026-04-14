@@ -6,9 +6,11 @@
 package transport
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net"
+	"sync"
 
 	"github.com/acf-sdk/sidecar/internal/crypto"
 	"github.com/acf-sdk/sidecar/internal/pipeline"
@@ -30,9 +32,10 @@ type Config struct {
 
 // Listener wraps a platform net.Listener and handles incoming connections.
 type Listener struct {
-	cfg    Config
-	ln     net.Listener
-	stopCh chan struct{}
+	cfg     Config
+	ln      net.Listener
+	stopCh  chan struct{}
+	handlers sync.WaitGroup
 }
 
 // NewListener creates a Listener bound to cfg.Address using cfg.Connector.
@@ -72,11 +75,17 @@ func (l *Listener) Serve() error {
 				return err
 			}
 		}
-		go l.handleConn(conn)
+		l.handlers.Add(1)
+		go func() {
+			defer l.handlers.Done()
+			l.handleConn(conn)
+		}()
 	}
 }
 
-// Stop closes the underlying listener, causing Serve to return.
+// Stop closes the underlying listener, causing Serve to return. It does not
+// wait for in-flight handlers; callers that need that ordering should call
+// Drain after Stop.
 func (l *Listener) Stop() {
 	select {
 	case <-l.stopCh:
@@ -85,6 +94,23 @@ func (l *Listener) Stop() {
 		close(l.stopCh)
 	}
 	l.ln.Close()
+}
+
+// Drain blocks until every in-flight handler returns or ctx is done. It is
+// safe to call after Stop. Returns ctx.Err() if the deadline hits before the
+// handlers finish.
+func (l *Listener) Drain(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		l.handlers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // handleConn processes a single client connection.
