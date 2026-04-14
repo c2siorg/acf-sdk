@@ -106,7 +106,7 @@ func main() {
 	}
 	log.Printf("sidecar: pipeline ready (mode=%s, block_threshold=%.2f)", mode, cfg.Thresholds.BlockScore)
 
-	// 7. Resolve IPC address (platform-specific default if unset).
+	// 8. Resolve IPC address (platform-specific default if unset).
 	connector := transport.DefaultConnector()
 	address := connector.DefaultAddress()
 	if p := os.Getenv("ACF_SOCKET_PATH"); p != "" {
@@ -115,7 +115,7 @@ func main() {
 		address = cfg.SocketPath
 	}
 
-	// 8. Create and start listener.
+	// 9. Create and start listener.
 	ln, err := transport.NewListener(transport.Config{
 		Address:    address,
 		Connector:  connector,
@@ -129,7 +129,7 @@ func main() {
 
 	log.Printf("sidecar: listening on %s", address)
 
-	// 9. Serve in background; block on shutdown signal.
+	// 10. Serve in background; block on shutdown signal.
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- ln.Serve() }()
 
@@ -146,7 +146,7 @@ func main() {
 		}
 	}
 
-	// 10. Drain in-flight handlers before tearing down telemetry so their
+	// 11. Drain in-flight handlers before tearing down telemetry so their
 	// spans close cleanly and their audit entries reach the sink. If the
 	// deadline expires we fail hard without touching the tracer or audit
 	// sink, since partial shutdown would ship truncated traces and race a
@@ -166,8 +166,10 @@ func main() {
 
 	// audit.Close drains the buffered channel via a blocking io.Writer, so a
 	// stalled filesystem or backpressured stdout could otherwise wedge
-	// shutdown. Bound the wait and log on timeout; the worker goroutine
-	// dies with the process.
+	// shutdown. Bound the wait and log on timeout. On timeout we do not
+	// close the underlying file because the drain goroutine may still be
+	// mid-write; closing underneath it would truncate the final entries.
+	// The OS reclaims the fd when the process exits.
 	auditCtx, auditCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer auditCancel()
 	auditDone := make(chan error, 1)
@@ -177,14 +179,13 @@ func main() {
 		if err != nil {
 			log.Printf("sidecar: audit close: %v", err)
 		}
-	case <-auditCtx.Done():
-		log.Printf("sidecar: audit close timed out, last entries may be lost")
-	}
-
-	if closeAuditFile != nil {
-		if err := closeAuditFile(); err != nil {
-			log.Printf("sidecar: audit file close: %v", err)
+		if closeAuditFile != nil {
+			if err := closeAuditFile(); err != nil {
+				log.Printf("sidecar: audit file close: %v", err)
+			}
 		}
+	case <-auditCtx.Done():
+		log.Printf("sidecar: audit close timed out, last entries may be lost; leaving fd to process exit")
 	}
 }
 
