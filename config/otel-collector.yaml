@@ -1,0 +1,35 @@
+# OpenTelemetry Collector configuration for the opt-in observability profile.
+# Receives OTLP HTTP from the sidecar on :4318 and forwards spans to the
+# Jaeger all-in-one container over OTLP gRPC on jaeger:4317.
+#
+# Batching smooths out sidecar emission bursts and keeps the collector-to-
+# jaeger link quiet. The memory_limiter guards against runaway heap growth
+# if the Jaeger exporter stalls.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 2s
+    send_batch_size: 512
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+exporters:
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/jaeger]

@@ -43,6 +43,41 @@ type Config struct {
 
 	// SignalWeights maps signal names to their contribution to the risk score.
 	SignalWeights map[string]float64 `yaml:"signal_weights"`
+
+	// Telemetry controls OpenTelemetry tracing and the structured audit log.
+	// The zero value installs noop sinks so enforcement runs identically with
+	// or without observability wired up.
+	Telemetry TelemetryConfig `yaml:"telemetry"`
+}
+
+// TelemetryConfig controls span emission and audit log output.
+type TelemetryConfig struct {
+	// OTelEndpoint is the OTLP HTTP collector URL. Accepts host:port or a
+	// full URL. Empty disables span emission.
+	OTelEndpoint string `yaml:"otel_endpoint"`
+
+	// ServiceName is stamped on every span as service.name. Defaults to
+	// acf-sidecar when empty.
+	ServiceName string `yaml:"service_name"`
+
+	// SampleRatio is the head-based sampling ratio in [0, 1]. A literal zero
+	// is honoured and disables span emission entirely.
+	SampleRatio float64 `yaml:"sample_ratio"`
+
+	// Insecure permits plaintext OTLP HTTP. Leave false for TLS collectors.
+	Insecure bool `yaml:"insecure"`
+
+	// AuditPath is the file path for the JSON audit log. Empty sends audit
+	// lines to stdout. "-" also means stdout. Parent directories are created
+	// on startup.
+	AuditPath string `yaml:"audit_path"`
+
+	// AuditBuffer is the size of the async audit channel. Defaults to 1024.
+	AuditBuffer int `yaml:"audit_buffer"`
+
+	// PolicyVersion is stamped on every audit entry. Surfaces which policy
+	// bundle produced a given decision.
+	PolicyVersion string `yaml:"policy_version"`
 }
 
 // PipelineConfig controls pipeline execution behaviour.
@@ -162,6 +197,11 @@ func defaults() *Config {
 		},
 		ToolAllowlist:      []string{},
 		MemoryKeyAllowlist: []string{},
+		Telemetry: TelemetryConfig{
+			SampleRatio:   1.0,
+			AuditBuffer:   1024,
+			PolicyVersion: "",
+		},
 	}
 }
 
