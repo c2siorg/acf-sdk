@@ -213,6 +213,7 @@ cd sdk/typescript && npm test
 
 # TypeScript sidecar integration tests
 cd sdk/typescript && npm run test:e2e
+# Prerequisites: export ACF_HMAC_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))") and start the sidecar in a separate shell (see step 2 above)
 
 # TypeScript/Python parity tests (against live sidecar)
 cd sdk/typescript && npm run test:parity

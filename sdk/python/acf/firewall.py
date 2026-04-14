@@ -143,7 +143,7 @@ class Firewall:
             "payload":     content,
             "state":       None,
         }
-        return json.dumps(ctx, separators=(",", ":")).encode("utf-8")
+        return json.dumps(ctx, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
     def _send(self, payload: bytes) -> Decision | SanitiseResult:
         resp     = self._transport.send(payload)
