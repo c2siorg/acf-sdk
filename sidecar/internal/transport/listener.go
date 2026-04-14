@@ -32,10 +32,11 @@ type Config struct {
 
 // Listener wraps a platform net.Listener and handles incoming connections.
 type Listener struct {
-	cfg     Config
-	ln      net.Listener
-	stopCh  chan struct{}
-	handlers sync.WaitGroup
+	cfg       Config
+	ln        net.Listener
+	stopCh    chan struct{}
+	serveDone chan struct{}
+	handlers  sync.WaitGroup
 }
 
 // NewListener creates a Listener bound to cfg.Address using cfg.Connector.
@@ -56,15 +57,19 @@ func NewListener(cfg Config) (*Listener, error) {
 	}
 
 	return &Listener{
-		cfg:    cfg,
-		ln:     ln,
-		stopCh: make(chan struct{}),
+		cfg:       cfg,
+		ln:        ln,
+		stopCh:    make(chan struct{}),
+		serveDone: make(chan struct{}),
 	}, nil
 }
 
 // Serve enters the accept loop. Blocks until Stop is called.
 // Returns nil after a clean shutdown, or a non-nil error on unexpected failure.
+// serveDone is closed when Serve returns, so Drain can wait for the accept
+// loop to finish before waiting on handlers.
 func (l *Listener) Serve() error {
+	defer close(l.serveDone)
 	for {
 		conn, err := l.ln.Accept()
 		if err != nil {
@@ -84,8 +89,8 @@ func (l *Listener) Serve() error {
 }
 
 // Stop closes the underlying listener, causing Serve to return. It does not
-// wait for in-flight handlers; callers that need that ordering should call
-// Drain after Stop.
+// wait for in-flight handlers or for Serve itself; callers that need that
+// ordering should call Drain after Stop.
 func (l *Listener) Stop() {
 	select {
 	case <-l.stopCh:
@@ -96,10 +101,17 @@ func (l *Listener) Stop() {
 	l.ln.Close()
 }
 
-// Drain blocks until every in-flight handler returns or ctx is done. It is
-// safe to call after Stop. Returns ctx.Err() if the deadline hits before the
-// handlers finish.
+// Drain blocks until the accept loop has exited AND every in-flight handler
+// has returned, or until ctx is done. Waiting on Serve first closes the gap
+// where a connection accepted after Stop could still register a handler
+// after handlers.Wait() has returned. Safe to call after Stop. Returns
+// ctx.Err() if the deadline hits first.
 func (l *Listener) Drain(ctx context.Context) error {
+	select {
+	case <-l.serveDone:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	done := make(chan struct{})
 	go func() {
 		l.handlers.Wait()

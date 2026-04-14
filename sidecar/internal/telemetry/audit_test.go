@@ -161,6 +161,30 @@ func TestAsyncSink_EmitAfterCloseNoop(t *testing.T) {
 	}
 }
 
+func TestAsyncSink_EmitAfterMuProtectedCloseDoesNotPanic(t *testing.T) {
+	// Regression for the Close/Emit panic. Without the mutex guard this
+	// interleaving sent on a closed channel. With the guard Close waits for
+	// the in-flight Emit to release the read lock before closing.
+	var buf safeBuffer
+	sink := NewAsyncSink(&buf, 1)
+
+	start := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		<-start
+		for i := 0; i < 1000; i++ {
+			sink.Emit(NewEntry())
+		}
+		close(done)
+	}()
+
+	close(start)
+	if err := sink.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	<-done
+}
+
 func TestAsyncSink_ConcurrentEmitAndClose(t *testing.T) {
 	// Hammer Emit from many goroutines while a second goroutine races Close.
 	// Without the mu guard this would panic with "send on closed channel".
