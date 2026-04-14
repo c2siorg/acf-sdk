@@ -161,6 +161,42 @@ func TestAsyncSink_EmitAfterCloseNoop(t *testing.T) {
 	}
 }
 
+func TestAsyncSink_ConcurrentEmitAndClose(t *testing.T) {
+	// Hammer Emit from many goroutines while a second goroutine races Close.
+	// Without the mu guard this would panic with "send on closed channel".
+	for trial := 0; trial < 50; trial++ {
+		var buf safeBuffer
+		sink := NewAsyncSink(&buf, 32)
+
+		var producers sync.WaitGroup
+		start := make(chan struct{})
+		for i := 0; i < 8; i++ {
+			producers.Add(1)
+			go func() {
+				defer producers.Done()
+				<-start
+				for j := 0; j < 100; j++ {
+					sink.Emit(NewEntry())
+				}
+			}()
+		}
+
+		close(start)
+		// Let producers run for a beat, then close concurrently.
+		go func() {
+			if err := sink.Close(); err != nil {
+				t.Errorf("close: %v", err)
+			}
+		}()
+		producers.Wait()
+		// Close is idempotent; calling again from the test goroutine must
+		// not panic and must not return a new error.
+		if err := sink.Close(); err != nil {
+			t.Errorf("second close: %v", err)
+		}
+	}
+}
+
 func TestNopSink_Interface(t *testing.T) {
 	var sink AuditSink = NopSink{}
 	sink.Emit(NewEntry())

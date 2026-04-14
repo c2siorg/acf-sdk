@@ -132,10 +132,16 @@ func main() {
 		}
 	}
 
-	// 10. Flush telemetry with a short deadline so a stalled collector cannot
-	// block shutdown.
-	flushCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+	// 10. Drain in-flight handlers before tearing down telemetry so their
+	// spans close cleanly and their audit entries reach the sink.
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := ln.Drain(drainCtx); err != nil {
+		log.Printf("sidecar: handler drain timed out: %v", err)
+	}
+	drainCancel()
+
+	flushCtx, flushCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer flushCancel()
 	if err := shutdownTracer(flushCtx); err != nil {
 		log.Printf("sidecar: tracer shutdown: %v", err)
 	}
