@@ -37,6 +37,9 @@ type Listener struct {
 	stopCh    chan struct{}
 	serveDone chan struct{}
 	handlers  sync.WaitGroup
+
+	connsMu sync.Mutex
+	conns   map[net.Conn]struct{}
 }
 
 // NewListener creates a Listener bound to cfg.Address using cfg.Connector.
@@ -61,6 +64,7 @@ func NewListener(cfg Config) (*Listener, error) {
 		ln:        ln,
 		stopCh:    make(chan struct{}),
 		serveDone: make(chan struct{}),
+		conns:     make(map[net.Conn]struct{}),
 	}, nil
 }
 
@@ -80,6 +84,11 @@ func (l *Listener) Serve() error {
 				return err
 			}
 		}
+		if !l.registerConn(conn) {
+			// Stop already ran; refuse the connection instead of leaking it.
+			conn.Close()
+			continue
+		}
 		l.handlers.Add(1)
 		go func() {
 			defer l.handlers.Done()
@@ -88,17 +97,24 @@ func (l *Listener) Serve() error {
 	}
 }
 
-// Stop closes the underlying listener, causing Serve to return. It does not
-// wait for in-flight handlers or for Serve itself; callers that need that
-// ordering should call Drain after Stop.
+// Stop closes the listener and every accepted connection, unblocking any
+// handler stuck in a read or write. Callers that need to wait for handler
+// goroutines to return should call Drain after Stop.
 func (l *Listener) Stop() {
 	select {
 	case <-l.stopCh:
 		// already stopped
+		return
 	default:
 		close(l.stopCh)
 	}
 	l.ln.Close()
+
+	l.connsMu.Lock()
+	for c := range l.conns {
+		c.Close()
+	}
+	l.connsMu.Unlock()
 }
 
 // Drain blocks until the accept loop has exited AND every in-flight handler
@@ -125,9 +141,33 @@ func (l *Listener) Drain(ctx context.Context) error {
 	}
 }
 
+// registerConn records a live connection so Stop can close it. Returns false
+// when the listener has already been stopped, in which case the caller
+// should drop the connection immediately rather than serve it.
+func (l *Listener) registerConn(c net.Conn) bool {
+	l.connsMu.Lock()
+	defer l.connsMu.Unlock()
+	select {
+	case <-l.stopCh:
+		return false
+	default:
+	}
+	l.conns[c] = struct{}{}
+	return true
+}
+
+func (l *Listener) deregisterConn(c net.Conn) {
+	l.connsMu.Lock()
+	delete(l.conns, c)
+	l.connsMu.Unlock()
+}
+
 // handleConn processes a single client connection.
 func (l *Listener) handleConn(conn net.Conn) {
-	defer conn.Close()
+	defer func() {
+		l.deregisterConn(conn)
+		conn.Close()
+	}()
 
 	// 1. Decode the frame header and payload.
 	rf, err := DecodeRequest(conn)
