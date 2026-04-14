@@ -133,12 +133,16 @@ func main() {
 	}
 
 	// 10. Drain in-flight handlers before tearing down telemetry so their
-	// spans close cleanly and their audit entries reach the sink.
+	// spans close cleanly and their audit entries reach the sink. If the
+	// deadline expires we fail hard without touching the tracer or audit
+	// sink, since partial shutdown would ship truncated traces and race a
+	// live handler into a closed audit channel.
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	if err := ln.Drain(drainCtx); err != nil {
-		log.Printf("sidecar: handler drain timed out: %v", err)
-	}
+	drainErr := ln.Drain(drainCtx)
 	drainCancel()
+	if drainErr != nil {
+		log.Fatalf("sidecar: handler drain did not complete: %v (telemetry left unflushed)", drainErr)
+	}
 
 	flushCtx, flushCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer flushCancel()
