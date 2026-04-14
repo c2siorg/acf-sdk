@@ -14,9 +14,6 @@ import (
 func TestDrainWaitsForServe(t *testing.T) {
 	ln, _, _ := newTestListener(t)
 
-	// Serve is still running. Drain must block on serveDone and hit the
-	// context deadline rather than returning immediately off an empty
-	// handler WaitGroup.
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
@@ -31,12 +28,33 @@ func TestDrainWaitsForServe(t *testing.T) {
 		t.Errorf("Drain returned too quickly (%v); expected to block until ctx deadline", elapsed)
 	}
 
-	// Now stop the listener and confirm Drain unblocks cleanly with a
-	// generous deadline.
 	ln.Stop()
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel2()
 	if err := ln.Drain(ctx2); err != nil {
 		t.Errorf("post-Stop Drain: %v", err)
+	}
+}
+
+// TestStopClosesConns covers the case where a client connects and then
+// hangs mid-request. Without Stop closing accepted connections the
+// handler's blocking Read would hold the WaitGroup forever and Drain
+// would hit its deadline even though the listener is "shut down".
+func TestStopClosesConns(t *testing.T) {
+	ln, _, address := newTestListener(t)
+
+	conn := dial(t, address)
+	defer conn.Close()
+
+	// Let Serve spawn the handler and let handleConn reach the blocking
+	// DecodeRequest call.
+	time.Sleep(50 * time.Millisecond)
+
+	ln.Stop()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := ln.Drain(ctx); err != nil {
+		t.Fatalf("Drain did not complete after Stop closed stalled client: %v", err)
 	}
 }
