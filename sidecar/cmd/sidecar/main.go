@@ -149,9 +149,24 @@ func main() {
 	if err := shutdownTracer(flushCtx); err != nil {
 		log.Printf("sidecar: tracer shutdown: %v", err)
 	}
-	if err := audit.Close(); err != nil {
-		log.Printf("sidecar: audit close: %v", err)
+
+	// audit.Close drains the buffered channel via a blocking io.Writer, so a
+	// stalled filesystem or backpressured stdout could otherwise wedge
+	// shutdown. Bound the wait and log on timeout; the worker goroutine
+	// dies with the process.
+	auditCtx, auditCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer auditCancel()
+	auditDone := make(chan error, 1)
+	go func() { auditDone <- audit.Close() }()
+	select {
+	case err := <-auditDone:
+		if err != nil {
+			log.Printf("sidecar: audit close: %v", err)
+		}
+	case <-auditCtx.Done():
+		log.Printf("sidecar: audit close timed out, last entries may be lost")
 	}
+
 	if closeAuditFile != nil {
 		if err := closeAuditFile(); err != nil {
 			log.Printf("sidecar: audit file close: %v", err)
