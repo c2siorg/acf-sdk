@@ -4,6 +4,14 @@
 // field is null in v1 and populated by the TTL state store in v2.
 package riskcontext
 
+// Signal is a named risk signal emitted by the scan stage and scored by the
+// aggregate stage. Category identifies the signal type; Score is the weighted
+// contribution (0.0–1.0) filled in by aggregate from SignalWeights config.
+type Signal struct {
+	Category string  `json:"category"`
+	Score    float64 `json:"score"`
+}
+
 // RiskContext is the payload exchanged over IPC and passed through every
 // pipeline stage in the sidecar. It is JSON-serialised as the frame payload.
 type RiskContext struct {
@@ -11,9 +19,10 @@ type RiskContext struct {
 	// aggregate stage. Zero on the inbound frame from the SDK.
 	Score float64 `json:"score"`
 
-	// Signals is the list of named signals emitted by the scan stage.
+	// Signals is the list of named signals emitted by the scan stage,
+	// with scores back-filled by the aggregate stage.
 	// Empty on the inbound frame; populated as the pipeline runs.
-	Signals []string `json:"signals"`
+	Signals []Signal `json:"signals"`
 
 	// Provenance identifies the origin of the payload (e.g. "user", "rag",
 	// "tool_output", "memory"). Set by the SDK before sending.

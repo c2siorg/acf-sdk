@@ -30,15 +30,15 @@ func (v *ValidateStage) Name() string { return "validate" }
 // missing or invalid. The stage does not mutate rc on success.
 func (v *ValidateStage) Run(rc *riskcontext.RiskContext) (hardBlock bool) {
 	if !validHookTypes[rc.HookType] {
-		rc.Signals = append(rc.Signals, "validate:invalid_hook_type")
+		rc.Signals = append(rc.Signals, riskcontext.Signal{Category: "validate:invalid_hook_type"})
 		return true
 	}
 	if rc.Provenance == "" {
-		rc.Signals = append(rc.Signals, "validate:missing_provenance")
+		rc.Signals = append(rc.Signals, riskcontext.Signal{Category: "validate:missing_provenance"})
 		return true
 	}
 	if rc.Payload == nil {
-		rc.Signals = append(rc.Signals, "validate:nil_payload")
+		rc.Signals = append(rc.Signals, riskcontext.Signal{Category: "validate:nil_payload"})
 		return true
 	}
 	return false

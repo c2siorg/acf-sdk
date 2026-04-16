@@ -5,7 +5,7 @@
 
 A Zero Trust security layer for LLM agents. Enforces policy-driven validation at every point an agent ingests input — not just at the front door.
 
-> **Status: Phase 2 complete — pipeline stages running. Phase 3 (OPA policy engine) next.**
+> **Status: Phase 3 complete — OPA policy engine running. Phase 4 (OTel observability + integration tests) next.**
 
 ---
 
@@ -146,7 +146,7 @@ Test policies with `make opa-test` — runs the full Rego test suite using `opa 
 
 ### Prerequisites
 
-- Go 1.22+
+- Go 1.25+
 - Python 3.10+
 - [OPA](https://www.openpolicyagent.org/docs/latest/#running-opa) (for policy tests, Phase 3+)
 
@@ -163,6 +163,7 @@ Keep this value — both the sidecar and the SDK must use the same key.
 ```bash
 cd sidecar && go build -o ../bin/acf-sidecar ./cmd/sidecar
 ./bin/acf-sidecar
+# sidecar: OPA engine ready (policy_dir=../policies/v1)
 # sidecar: pipeline ready (mode=strict, block_threshold=0.85)
 # sidecar: listening on /tmp/acf.sock
 ```
@@ -239,7 +240,7 @@ acf-sdk/
 |---|---|---|
 | 1 | Wire protocol + HMAC/nonce crypto | **Complete** — 23 Go tests, 35 Python tests |
 | 2 | Pipeline stages (validate/normalise/scan/aggregate) | **Complete** — 49 Go tests |
-| 3 | OPA integration + Rego policies | Next |
+| 3 | OPA integration + Rego policies | **Complete** — real policy evaluation, sanitise executor, hot reload |
 | 4 | OTel observability + integration test suite | Pending |
 | v2 | Stateful session risk, additional hooks, TypeScript SDK | Deferred |
 
@@ -259,9 +260,11 @@ See [PHILOSOPHY.md](PHILOSOPHY.md) for the full design rationale. The short vers
 
 ## Documentation
 
+- [MITRE ATLAS analysis](docs/mitre-atlas-analysis.md) — threat-category mapping, coverage, gaps, residual risk
 - [Architecture](docs/architecture.md) — full system design, IPC wire protocol, pipeline stages
 - [Phase 1](docs/phase1.md) — wire protocol and crypto implementation
 - [Phase 2](docs/phase2.md) — pipeline stages, strict_mode switch, scoring
+- [Phase 3](docs/phase03.md) — OPA engine, signal format, sanitise executor, hot reload
 - [Crypto](docs/crypto.md) — HMAC signing and nonce replay protection
 - [Policy authoring](docs/policy-authoring.md) — how to write and test Rego policies
 - [Philosophy](PHILOSOPHY.md) — design principles and threat model rationale

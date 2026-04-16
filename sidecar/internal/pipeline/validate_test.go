@@ -52,7 +52,7 @@ func TestValidate_MissingProvenance(t *testing.T) {
 	}
 	found := false
 	for _, s := range rc.Signals {
-		if s == "validate:missing_provenance" {
+		if s.Category == "validate:missing_provenance" {
 			found = true
 		}
 	}

@@ -126,9 +126,19 @@ func (l *Listener) handleConn(conn net.Conn) {
 		decision = result.Decision
 		log.Printf("transport: session=%s hook=%s score=%.2f signals=%v decision=%d blocked_at=%s",
 			rc.SessionID, rc.HookType, result.Score, result.Signals, decision, result.BlockedAt)
+
+		// 5. Write response (include sanitised payload if decision == SANITISE).
+		resp := EncodeResponse(&ResponseFrame{
+			Decision:         decision,
+			SanitisedPayload: result.SanitisedPayload,
+		})
+		if _, err := conn.Write(resp); err != nil {
+			log.Printf("transport: write error: %v", err)
+		}
+		return
 	}
 
-	// 5. Write response.
+	// Phase 1 fallback (no pipeline configured): write ALLOW.
 	resp := EncodeResponse(&ResponseFrame{Decision: decision})
 	if _, err := conn.Write(resp); err != nil {
 		log.Printf("transport: write error: %v", err)

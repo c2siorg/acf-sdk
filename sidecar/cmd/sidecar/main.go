@@ -13,6 +13,7 @@ import (
 	"github.com/acf-sdk/sidecar/internal/config"
 	"github.com/acf-sdk/sidecar/internal/crypto"
 	"github.com/acf-sdk/sidecar/internal/pipeline"
+	"github.com/acf-sdk/sidecar/internal/policy"
 	"github.com/acf-sdk/sidecar/internal/transport"
 )
 
@@ -49,13 +50,22 @@ func main() {
 		patterns = &config.Patterns{}
 	}
 
-	// 5. Build the enforcement pipeline.
-	pl := pipeline.New(cfg, []pipeline.Stage{
+	// 5. Initialize OPA policy engine.
+	eng, err := policy.NewEngine(cfg.PolicyDir)
+	if err != nil {
+		log.Fatalf("sidecar: failed to initialize OPA engine: %v\n"+
+			"  Check that policy_dir (%s) contains valid .rego files.", err, cfg.PolicyDir)
+	}
+	defer eng.Stop()
+	log.Printf("sidecar: OPA engine ready (policy_dir=%s)", cfg.PolicyDir)
+
+	// 6. Build the enforcement pipeline.
+	pl := pipeline.NewWithEvaluator(cfg, []pipeline.Stage{
 		pipeline.NewValidateStage(),
 		pipeline.NewNormaliseStage(),
 		pipeline.NewScanStage(cfg, patterns.Patterns),
 		pipeline.NewAggregateStage(cfg),
-	})
+	}, eng)
 
 	mode := "strict"
 	if !cfg.Pipeline.StrictMode {
@@ -63,7 +73,7 @@ func main() {
 	}
 	log.Printf("sidecar: pipeline ready (mode=%s, block_threshold=%.2f)", mode, cfg.Thresholds.BlockScore)
 
-	// 6. Resolve IPC address (platform-specific default if unset).
+	// 7. Resolve IPC address (platform-specific default if unset).
 	connector := transport.DefaultConnector()
 	address := connector.DefaultAddress()
 	if p := os.Getenv("ACF_SOCKET_PATH"); p != "" {
@@ -72,7 +82,7 @@ func main() {
 		address = cfg.SocketPath
 	}
 
-	// 7. Create and start listener.
+	// 8. Create and start listener.
 	ln, err := transport.NewListener(transport.Config{
 		Address:    address,
 		Connector:  connector,

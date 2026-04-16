@@ -1,12 +1,24 @@
 package pipeline
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/acf-sdk/sidecar/internal/config"
 	"github.com/acf-sdk/sidecar/pkg/decision"
 	"github.com/acf-sdk/sidecar/pkg/riskcontext"
 )
+
+// mockEvaluator is a test double for the Evaluator interface.
+type mockEvaluator struct {
+	decision string
+	targets  []string
+	err      error
+}
+
+func (m *mockEvaluator) Evaluate(_ *riskcontext.RiskContext) (string, []string, error) {
+	return m.decision, m.targets, m.err
+}
 
 func testConfig(strictMode bool) *config.Config {
 	return &config.Config{
@@ -123,7 +135,7 @@ func TestPipeline_MidBandSanitise(t *testing.T) {
 		HookType:   "on_context",
 		Provenance: "rag",
 		Payload:    "some rag content",
-		Signals:    []string{"embedded_instruction"},
+		Signals:    []riskcontext.Signal{{Category: "embedded_instruction"}},
 	}
 	// Run only aggregate to test threshold logic directly.
 	agg := NewAggregateStage(cfg)
@@ -131,6 +143,86 @@ func TestPipeline_MidBandSanitise(t *testing.T) {
 	result := thresholdDecision(rc.Score, cfg.Thresholds)
 	if result != decision.Sanitise {
 		t.Errorf("expected SANITISE for mid-band score, got decision=%d score=%.2f", result, rc.Score)
+	}
+}
+
+func TestPipeline_NilEvaluatorFallsBackToThreshold(t *testing.T) {
+	// New() sets evaluator=nil — threshold logic governs.
+	pl := buildPipeline(testConfig(true), []string{})
+	rc := &riskcontext.RiskContext{
+		HookType:   "on_prompt",
+		Provenance: "user",
+		Payload:    "what is the weather today",
+	}
+	result := pl.Run(rc)
+	if result.Decision != decision.Allow {
+		t.Errorf("nil evaluator should fall back to threshold ALLOW, got decision=%d", result.Decision)
+	}
+}
+
+func TestPipeline_MockEvaluatorOPAOverridesLowScore(t *testing.T) {
+	cfg := testConfig(true)
+	pl := NewWithEvaluator(cfg, []Stage{
+		NewValidateStage(),
+		NewNormaliseStage(),
+		NewScanStage(cfg, []string{}),
+		NewAggregateStage(cfg),
+	}, &mockEvaluator{decision: "BLOCK"})
+
+	rc := &riskcontext.RiskContext{
+		HookType:   "on_prompt",
+		Provenance: "user",
+		Score:      0.1, // threshold would ALLOW, but mock overrides
+		Payload:    "hello",
+	}
+	result := pl.Run(rc)
+	if result.Decision != decision.Block {
+		t.Errorf("mock evaluator should BLOCK despite low score, got decision=%d", result.Decision)
+	}
+}
+
+func TestPipeline_MockEvaluatorSANITISE_PayloadPopulated(t *testing.T) {
+	cfg := testConfig(true)
+	pl := NewWithEvaluator(cfg, []Stage{
+		NewValidateStage(),
+		NewNormaliseStage(),
+		NewScanStage(cfg, []string{}),
+		NewAggregateStage(cfg),
+	}, &mockEvaluator{decision: "SANITISE", targets: []string{"prompt_text"}})
+
+	rc := &riskcontext.RiskContext{
+		HookType:      "on_prompt",
+		Provenance:    "user",
+		Payload:       "suspicious content here",
+		CanonicalText: "suspicious content here",
+	}
+	result := pl.Run(rc)
+	if result.Decision != decision.Sanitise {
+		t.Errorf("expected SANITISE, got decision=%d", result.Decision)
+	}
+	if result.SanitisedPayload == nil {
+		t.Error("expected SanitisedPayload to be populated for SANITISE decision")
+	}
+}
+
+func TestPipeline_OPAErrorFallsBackToThreshold(t *testing.T) {
+	cfg := testConfig(true)
+	pl := NewWithEvaluator(cfg, []Stage{
+		NewValidateStage(),
+		NewNormaliseStage(),
+		NewScanStage(cfg, []string{}),
+		NewAggregateStage(cfg),
+	}, &mockEvaluator{err: errors.New("opa unavailable")})
+
+	rc := &riskcontext.RiskContext{
+		HookType:   "on_prompt",
+		Provenance: "user",
+		Payload:    "what is the weather today",
+	}
+	result := pl.Run(rc)
+	// OPA errored → threshold governs → score 0.0 → ALLOW
+	if result.Decision != decision.Allow {
+		t.Errorf("OPA error should fall back to threshold ALLOW, got decision=%d", result.Decision)
 	}
 }
 

@@ -25,30 +25,34 @@ func NewAggregateStage(cfg *config.Config) *AggregateStage {
 
 func (a *AggregateStage) Name() string { return "aggregate" }
 
-// Run computes rc.Score from the signals in rc.Signals.
+// Run computes rc.Score from the signals in rc.Signals and back-fills each
+// signal's Score field from SignalWeights so OPA sees fully-scored signals.
 // Always returns hardBlock=false — the dispatcher applies threshold logic.
 func (a *AggregateStage) Run(rc *riskcontext.RiskContext) (hardBlock bool) {
-	score := maxSignalWeight(rc.Signals, a.cfg.SignalWeights)
+	score := applySignalWeights(rc.Signals, a.cfg.SignalWeights)
 	score *= a.cfg.ProvenanceWeight(rc.Provenance)
 	score = clamp(score)
 
 	// v2: blend in historical score from state store (no-op in v1 — State is nil).
-	// Placeholder: Phase 3 populates this via the TTL state store.
 
 	rc.Score = score
 	return false
 }
 
-// maxSignalWeight returns the highest weight among all emitted signals.
+// applySignalWeights looks up each signal's weight, writes it back onto the
+// signal (so OPA sees sig.score), and returns the maximum weight found.
 // Returns 0.0 if no signals are present or none have a configured weight.
-func maxSignalWeight(signals []string, weights map[string]float64) float64 {
-	var max float64
-	for _, sig := range signals {
-		if w, ok := weights[sig]; ok && w > max {
-			max = w
+func applySignalWeights(signals []riskcontext.Signal, weights map[string]float64) float64 {
+	var maxW float64
+	for i := range signals {
+		if w, ok := weights[signals[i].Category]; ok {
+			signals[i].Score = w
+			if w > maxW {
+				maxW = w
+			}
 		}
 	}
-	return max
+	return maxW
 }
 
 // clamp ensures score stays within [0.0, 1.0].
