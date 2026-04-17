@@ -48,6 +48,10 @@ signal_weights:                   # per-signal contribution to risk score (0.0â€
   validate:invalid_hook_type: 1.0 # unknown hook type â€” always block
   validate:missing_provenance: 0.9
   validate:nil_payload: 1.0
+  validate:tool_payload_malformed: 1.0   # tool payload must be an object with a name
+  validate:memory_payload_malformed: 1.0 # memory payload must be an object
+  validate:memory_missing_key: 1.0       # memory payload must include a key
+  validate:memory_invalid_op: 1.0        # memory op must be read or write
 
 # HMAC key is loaded from the ACF_HMAC_KEY environment variable at startup.
 # Minimum 32 bytes, hex-encoded.

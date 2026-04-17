@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const defaultNonceTTL = 5 * time.Minute
+
 // NonceStore tracks seen nonces and evicts them after TTL expires.
 // It is safe for concurrent use.
 type NonceStore struct {
@@ -19,7 +21,15 @@ type NonceStore struct {
 
 // NewNonceStore creates a NonceStore with the given TTL and starts
 // the background eviction goroutine. Call Stop() on shutdown.
+//
+// Non-positive TTLs fall back to the default window instead of panicking in
+// time.NewTicker. This keeps misconfiguration fail-safe without changing the
+// constructor shape used across Phase 1/2.
 func NewNonceStore(ttl time.Duration) *NonceStore {
+	if ttl <= 0 {
+		ttl = defaultNonceTTL
+	}
+
 	ns := &NonceStore{
 		m:      make(map[string]time.Time),
 		ttl:    ttl,

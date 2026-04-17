@@ -1,38 +1,36 @@
-// normalise.go — Stage 2 of the pipeline.
+// normalise.go - Stage 2 of the pipeline.
 // Produces canonical text for scanning by applying (in order):
-//  1. Recursive URL decoding
-//  2. Recursive Base64 decoding
-//  3. Unicode NFKC normalisation
-//  4. Zero-width character stripping
-//  5. Leetspeak cleaning
+//  1. Unicode NFKC normalisation
+//  2. Invisible-format stripping
+//  3. Bounded chained decode attempts (URL, Base64, hex)
+//  4. Unicode NFKC normalisation again
+//  5. Invisible-format stripping again
+//  6. Leetspeak cleaning
 //
 // The result is written to rc.CanonicalText. The original rc.Payload is never
-// mutated. Normalise never emits a hard block signal — it is a pure transform.
+// mutated. Normalise never emits a hard block signal - it is a pure transform.
 package pipeline
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net/url"
+	"reflect"
+	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/acf-sdk/sidecar/pkg/riskcontext"
 )
 
-// zeroWidthChars is the set of Unicode code points that are invisible and
-// commonly used to bypass keyword detection.
-var zeroWidthChars = []rune{
-	'\u200b', // zero-width space
-	'\u200c', // zero-width non-joiner
-	'\u200d', // zero-width joiner
-	'\u00ad', // soft hyphen
-	'\ufeff', // BOM / zero-width no-break space
-	'\u2060', // word joiner
-	'\u180e', // mongolian vowel separator
-}
+const (
+	maxDecodeRounds      = 4
+	minEncodedTextLength = 8
+)
 
 // leetspeakMap maps common leet substitutions to their ASCII equivalents.
 var leetspeakMap = map[rune]rune{
@@ -65,103 +63,250 @@ func NewNormaliseStage() *NormaliseStage {
 	return &NormaliseStage{}
 }
 
-// payloadText extracts a string representation from the payload.
-// For string payloads, returns the string directly.
-// For other types, uses fmt.Sprintf as a best-effort fallback.
+// payloadText recursively extracts text from nested payload structures.
+// Map keys are traversed in sorted order so canonical text stays stable across
+// runs even when Go map iteration order changes.
 func payloadText(payload any) string {
+	parts := make([]string, 0, 8)
+	collectPayloadText(&parts, payload)
+	return strings.Join(parts, " ")
+}
+
+func collectPayloadText(parts *[]string, payload any) {
+	if payload == nil {
+		return
+	}
+
 	switch v := payload.(type) {
 	case string:
-		return v
-	case map[string]any:
-		// For structured payloads (on_tool_call, on_context), concatenate all
-		// string values for scanning purposes.
-		var parts []string
-		for _, val := range v {
-			if s, ok := val.(string); ok {
-				parts = append(parts, s)
-			}
+		appendTextPart(parts, v)
+		return
+	case []any:
+		for _, item := range v {
+			collectPayloadText(parts, item)
 		}
-		return strings.Join(parts, " ")
-	default:
-		return fmt.Sprintf("%v", v)
+		return
+	case map[string]any:
+		for _, key := range sortedMapKeys(v) {
+			collectPayloadText(parts, v[key])
+		}
+		return
 	}
+
+	rv := reflect.ValueOf(payload)
+	if !rv.IsValid() {
+		return
+	}
+
+	switch rv.Kind() {
+	case reflect.Map:
+		if rv.Type().Key().Kind() != reflect.String {
+			appendTextPart(parts, fmt.Sprintf("%v", payload))
+			return
+		}
+		keys := make([]string, 0, rv.Len())
+		for _, key := range rv.MapKeys() {
+			keys = append(keys, key.String())
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			collectPayloadText(parts, rv.MapIndex(reflect.ValueOf(key)).Interface())
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < rv.Len(); i++ {
+			collectPayloadText(parts, rv.Index(i).Interface())
+		}
+	case reflect.String:
+		appendTextPart(parts, rv.String())
+	default:
+		appendTextPart(parts, fmt.Sprintf("%v", payload))
+	}
+}
+
+func appendTextPart(parts *[]string, text string) {
+	if trimmed := strings.TrimSpace(text); trimmed != "" {
+		*parts = append(*parts, trimmed)
+	}
+}
+
+func sortedMapKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // normalise applies all transforms to text and returns the canonical form.
 func normalise(text string) string {
-	text = decodeURL(text)
-	text = decodeBase64(text)
 	text = applyNFKC(text)
 	text = stripZeroWidth(text)
-	text = cleanLeetspeak(text)
-	return text
-}
 
-// decodeURL repeatedly URL-decodes text until stable.
-func decodeURL(text string) string {
-	for {
-		decoded, err := url.QueryUnescape(text)
-		if err != nil || decoded == text {
-			return text
+	for round := 0; round < maxDecodeRounds; round++ {
+		changed := false
+
+		if decoded, ok := tryDecodeURL(text); ok {
+			text = decoded
+			changed = true
 		}
-		text = decoded
-	}
-}
-
-// decodeBase64 detects and recursively decodes base64-encoded segments.
-// Stops when no decodable segment is found.
-func decodeBase64(text string) string {
-	for {
-		decoded := tryBase64(text)
-		if decoded == text {
-			return text
+		if decoded, ok := tryDecodeBase64(text); ok {
+			text = decoded
+			changed = true
 		}
-		text = decoded
+		if decoded, ok := tryDecodeHex(text); ok {
+			text = decoded
+			changed = true
+		}
+		if !changed {
+			break
+		}
+
+		// Re-apply canonicalisation after each successful decode step so the next
+		// round sees normalized text rather than attacker-controlled wrappers.
+		text = applyNFKC(text)
+		text = stripZeroWidth(text)
 	}
+
+	text = applyNFKC(text)
+	text = stripZeroWidth(text)
+	return cleanLeetspeak(text)
 }
 
-// tryBase64 attempts to base64-decode text. Returns the decoded string if
-// successful and the result is printable ASCII/UTF-8, otherwise returns text.
-func tryBase64(text string) string {
-	// Only attempt if the text looks like a base64 candidate (length divisible
-	// by 4 after stripping whitespace, or padded).
+func tryDecodeURL(text string) (string, bool) {
+	if !strings.Contains(text, "%") {
+		return text, false
+	}
+
+	decoded, err := url.PathUnescape(text)
+	if err != nil || decoded == text {
+		return text, false
+	}
+
+	return decoded, true
+}
+
+func tryDecodeBase64(text string) (string, bool) {
 	candidate := strings.TrimSpace(text)
-	if len(candidate) < 4 {
-		return text
+	if !looksLikeBase64Candidate(candidate) {
+		return text, false
 	}
-	decoded, err := base64.StdEncoding.DecodeString(candidate)
-	if err != nil {
-		decoded, err = base64.URLEncoding.DecodeString(candidate)
+
+	for _, enc := range []*base64.Encoding{
+		base64.StdEncoding,
+		base64.URLEncoding,
+		base64.RawStdEncoding,
+		base64.RawURLEncoding,
+	} {
+		decoded, err := enc.DecodeString(candidate)
 		if err != nil {
-			decoded, err = base64.RawStdEncoding.DecodeString(candidate)
-			if err != nil {
-				return text
-			}
+			continue
+		}
+		if result, ok := decodedText(decoded); ok {
+			return result, true
 		}
 	}
-	// Only accept the decoded form if it is valid UTF-8 and contains printable chars.
-	result := string(decoded)
-	if !isPrintableUTF8(result) {
-		return text
-	}
-	return result
+
+	return text, false
 }
 
-// isPrintableUTF8 returns true if s is valid UTF-8 containing at least some
-// printable characters and no null bytes.
-func isPrintableUTF8(s string) bool {
-	if strings.ContainsRune(s, 0) {
+func looksLikeBase64Candidate(candidate string) bool {
+	if len(candidate) < minEncodedTextLength || len(candidate)%4 == 1 {
 		return false
 	}
-	printable := 0
-	for _, r := range s {
-		if r == unicode.ReplacementChar {
+
+	for _, r := range candidate {
+		if unicode.IsSpace(r) {
 			return false
 		}
-		if unicode.IsPrint(r) {
-			printable++
+		if !isBase64Rune(r) {
+			return false
 		}
 	}
+
+	return true
+}
+
+func isBase64Rune(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z':
+		return true
+	case r >= 'A' && r <= 'Z':
+		return true
+	case r >= '0' && r <= '9':
+		return true
+	case r == '+' || r == '/' || r == '=' || r == '-' || r == '_':
+		return true
+	default:
+		return false
+	}
+}
+
+func tryDecodeHex(text string) (string, bool) {
+	candidate := strings.TrimSpace(text)
+	candidate = strings.TrimPrefix(candidate, "0x")
+	candidate = strings.TrimPrefix(candidate, "0X")
+	if !looksLikeHexCandidate(candidate) {
+		return text, false
+	}
+
+	decoded, err := hex.DecodeString(candidate)
+	if err != nil {
+		return text, false
+	}
+	if result, ok := decodedText(decoded); ok {
+		return result, true
+	}
+
+	return text, false
+}
+
+func looksLikeHexCandidate(candidate string) bool {
+	if len(candidate) < minEncodedTextLength || len(candidate)%2 != 0 {
+		return false
+	}
+
+	for _, r := range candidate {
+		switch {
+		case r >= '0' && r <= '9':
+		case r >= 'a' && r <= 'f':
+		case r >= 'A' && r <= 'F':
+		default:
+			return false
+		}
+	}
+
+	return true
+}
+
+func decodedText(decoded []byte) (string, bool) {
+	result := string(decoded)
+	if !isPrintableUTF8(result) {
+		return "", false
+	}
+	return result, true
+}
+
+// isPrintableUTF8 returns true if s is valid UTF-8 containing printable
+// characters (including standard whitespace) and no null bytes.
+func isPrintableUTF8(s string) bool {
+	if !utf8.ValidString(s) || strings.ContainsRune(s, 0) {
+		return false
+	}
+
+	printable := 0
+	for _, r := range s {
+		switch r {
+		case '\n', '\r', '\t':
+			printable++
+			continue
+		}
+		if !unicode.IsPrint(r) {
+			return false
+		}
+		printable++
+	}
+
 	return printable > 0
 }
 
@@ -172,18 +317,29 @@ func applyNFKC(text string) string {
 	return norm.NFKC.String(text)
 }
 
-// stripZeroWidth removes all zero-width and invisible Unicode characters.
+// stripZeroWidth removes invisible format characters commonly used to hide
+// malicious content in otherwise readable text while preserving ordinary
+// whitespace such as spaces and newlines.
 func stripZeroWidth(text string) string {
-	zwSet := make(map[rune]bool, len(zeroWidthChars))
-	for _, r := range zeroWidthChars {
-		zwSet[r] = true
-	}
 	return strings.Map(func(r rune) rune {
-		if zwSet[r] {
-			return -1 // drop
+		if isInvisibleFormatRune(r) {
+			return -1
 		}
 		return r
 	}, text)
+}
+
+func isInvisibleFormatRune(r rune) bool {
+	if unicode.In(r, unicode.Cf) {
+		return true
+	}
+
+	switch r {
+	case '\u034f': // combining grapheme joiner
+		return true
+	default:
+		return false
+	}
 }
 
 // cleanLeetspeak replaces common leet substitutions with their ASCII equivalents.

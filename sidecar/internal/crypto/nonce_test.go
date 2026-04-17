@@ -76,3 +76,27 @@ func TestNonceStore_Concurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestNonceStore_ZeroTTLFallsBackToDefault(t *testing.T) {
+	ns := NewNonceStore(0)
+	defer ns.Stop()
+
+	if ns.ttl != defaultNonceTTL {
+		t.Fatalf("ttl: got %v, want %v", ns.ttl, defaultNonceTTL)
+	}
+	if ns.Seen([]byte("0123456789abcdef")) {
+		t.Error("expected first nonce use to be accepted after TTL fallback")
+	}
+}
+
+func TestNonceStore_NegativeTTLFallsBackToDefault(t *testing.T) {
+	ns := NewNonceStore(-1 * time.Second)
+	defer ns.Stop()
+
+	if ns.ttl != defaultNonceTTL {
+		t.Fatalf("ttl: got %v, want %v", ns.ttl, defaultNonceTTL)
+	}
+	if ns.Seen([]byte("fedcba9876543210")) {
+		t.Error("expected first nonce use to be accepted after TTL fallback")
+	}
+}
