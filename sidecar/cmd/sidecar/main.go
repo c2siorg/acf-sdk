@@ -4,15 +4,19 @@
 package main
 
 import (
+	"context"
+	"io"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/acf-sdk/sidecar/internal/config"
 	"github.com/acf-sdk/sidecar/internal/crypto"
 	"github.com/acf-sdk/sidecar/internal/pipeline"
+	"github.com/acf-sdk/sidecar/internal/telemetry"
 	"github.com/acf-sdk/sidecar/internal/transport"
 )
 
@@ -52,12 +56,37 @@ func main() {
 		patterns = &config.Patterns{}
 	}
 
-	// 5. Build the enforcement pipeline.
-	pl := pipeline.New(cfg, []pipeline.Stage{
+	// 5. Wire telemetry. Empty endpoint or missing audit path install noops.
+	tracer, shutdownTracer, err := telemetry.Init(context.Background(), &telemetry.OTelConfig{
+		Endpoint:    cfg.Telemetry.OTelEndpoint,
+		ServiceName: cfg.Telemetry.ServiceName,
+		SampleRatio: cfg.Telemetry.SampleRatio,
+		Insecure:    cfg.Telemetry.Insecure,
+	})
+	if err != nil {
+		log.Printf("sidecar: telemetry init: %v (using noop tracer)", err)
+	}
+
+	auditWriter, closeAuditFile, err := openAuditWriter(cfg.Telemetry.AuditPath)
+	if err != nil {
+		log.Fatalf("sidecar: cannot open audit sink: %v", err)
+	}
+	buffer := cfg.Telemetry.AuditBuffer
+	if buffer <= 0 {
+		buffer = 1024
+	}
+	audit := telemetry.NewAsyncSink(auditWriter, buffer)
+
+	// 6. Build the enforcement pipeline.
+	pl := pipeline.NewWithOptions(cfg, []pipeline.Stage{
 		pipeline.NewValidateStage(),
 		pipeline.NewNormaliseStage(),
 		pipeline.NewScanStage(cfg, patterns.Patterns),
 		pipeline.NewAggregateStage(cfg),
+	}, pipeline.Options{
+		Tracer:        tracer,
+		AuditSink:     audit,
+		PolicyVersion: cfg.Telemetry.PolicyVersion,
 	})
 
 	mode := "strict"
@@ -66,7 +95,7 @@ func main() {
 	}
 	log.Printf("sidecar: pipeline ready (mode=%s, block_threshold=%.2f)", mode, cfg.Thresholds.BlockScore)
 
-	// 6. Resolve IPC address (platform-specific default if unset).
+	// 7. Resolve IPC address (platform-specific default if unset).
 	connector := transport.DefaultConnector()
 	address := connector.DefaultAddress()
 	if p := os.Getenv("ACF_SOCKET_PATH"); p != "" {
@@ -75,7 +104,7 @@ func main() {
 		address = cfg.SocketPath
 	}
 
-	// 7. Create and start listener.
+	// 8. Create and start listener.
 	ln, err := transport.NewListener(transport.Config{
 		Address:    address,
 		Connector:  connector,
@@ -89,7 +118,7 @@ func main() {
 
 	log.Printf("sidecar: listening on %s", address)
 
-	// 8. Serve in background; block on shutdown signal.
+	// 9. Serve in background; block on shutdown signal.
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- ln.Serve() }()
 
@@ -105,4 +134,62 @@ func main() {
 			log.Fatalf("sidecar: listener error: %v", err)
 		}
 	}
+
+	// 10. Drain in-flight handlers before tearing down telemetry so their
+	// spans close cleanly and their audit entries reach the sink. If the
+	// deadline expires we fail hard without touching the tracer or audit
+	// sink, since partial shutdown would ship truncated traces and race a
+	// live handler into a closed audit channel.
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	drainErr := ln.Drain(drainCtx)
+	drainCancel()
+	if drainErr != nil {
+		log.Fatalf("sidecar: handler drain did not complete: %v (telemetry left unflushed)", drainErr)
+	}
+
+	flushCtx, flushCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer flushCancel()
+	if err := shutdownTracer(flushCtx); err != nil {
+		log.Printf("sidecar: tracer shutdown: %v", err)
+	}
+
+	// audit.Close drains the buffered channel via a blocking io.Writer, so a
+	// stalled filesystem or backpressured stdout could otherwise wedge
+	// shutdown. Bound the wait and log on timeout. On timeout we do not
+	// close the underlying file because the drain goroutine may still be
+	// mid-write; closing underneath it would truncate the final entries.
+	// The OS reclaims the fd when the process exits.
+	auditCtx, auditCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer auditCancel()
+	auditDone := make(chan error, 1)
+	go func() { auditDone <- audit.Close() }()
+	select {
+	case err := <-auditDone:
+		if err != nil {
+			log.Printf("sidecar: audit close: %v", err)
+		}
+		if closeAuditFile != nil {
+			if err := closeAuditFile(); err != nil {
+				log.Printf("sidecar: audit file close: %v", err)
+			}
+		}
+	case <-auditCtx.Done():
+		log.Printf("sidecar: audit close timed out, last entries may be lost; leaving fd to process exit")
+	}
+}
+
+// openAuditWriter routes audit output to stdout (empty or "-") or a file,
+// creating the parent directory on demand.
+func openAuditWriter(path string) (io.Writer, func() error, error) {
+	if path == "" || path == "-" {
+		return os.Stdout, nil, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, nil, err
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, nil, err
+	}
+	return f, f.Close, nil
 }
