@@ -1,6 +1,6 @@
 // aggregate.go — Stage 4 of the pipeline.
 // Combines scanner signals into a final risk score (0.0–1.0):
-//   - Takes the maximum weight across all emitted signals (avoids score inflation)
+//   - Sums all signal scores (clamped to 1.0) so multiple signals compound
 //   - Applies provenance trust weight as a multiplier
 //   - If State is non-nil (v2), blends in prior_score (placeholder, no-op in v1)
 //
@@ -28,7 +28,7 @@ func (a *AggregateStage) Name() string { return "aggregate" }
 // Run computes rc.Score from the signals in rc.Signals.
 // Always returns hardBlock=false — the dispatcher applies threshold logic.
 func (a *AggregateStage) Run(rc *riskcontext.RiskContext) (hardBlock bool) {
-	score := maxSignalWeight(rc.Signals, a.cfg.SignalWeights)
+	score := sumSignalScore(rc.Signals)
 	score *= a.cfg.ProvenanceWeight(rc.Provenance)
 	score = clamp(score)
 
@@ -39,16 +39,16 @@ func (a *AggregateStage) Run(rc *riskcontext.RiskContext) (hardBlock bool) {
 	return false
 }
 
-// maxSignalWeight returns the highest weight among all emitted signals.
-// Returns 0.0 if no signals are present or none have a configured weight.
-func maxSignalWeight(signals []string, weights map[string]float64) float64 {
-	var max float64
+// sumSignalScore returns the sum of all signal scores, unclamped.
+// clamp() is applied by the caller after provenance weighting.
+// Additive scoring ensures multiple medium-risk signals compound correctly
+// instead of the highest single signal masking the rest.
+func sumSignalScore(signals []riskcontext.Signal) float64 {
+	var total float64
 	for _, sig := range signals {
-		if w, ok := weights[sig]; ok && w > max {
-			max = w
-		}
+		total += sig.Score
 	}
-	return max
+	return total
 }
 
 // clamp ensures score stays within [0.0, 1.0].

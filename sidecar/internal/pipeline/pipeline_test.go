@@ -18,11 +18,6 @@ func testConfig(strictMode bool) *config.Config {
 		TrustWeights: map[string]float64{
 			"user": 1.0,
 		},
-		SignalWeights: map[string]float64{
-			"jailbreak_pattern":       0.9,
-			"validate:nil_payload":    1.0,
-			"validate:missing_provenance": 0.9,
-		},
 		ToolAllowlist:      []string{},
 		MemoryKeyAllowlist: []string{},
 	}
@@ -116,14 +111,12 @@ func TestPipeline_NonStrictCollectsAllSignals(t *testing.T) {
 
 func TestPipeline_MidBandSanitise(t *testing.T) {
 	cfg := testConfig(true)
-	// Use a signal weight that lands between sanitise and block thresholds.
-	cfg.SignalWeights["embedded_instruction"] = 0.65
-	// Manually inject the signal to simulate scan output.
+	// Manually inject a structured signal with a score in the sanitise band.
 	rc := &riskcontext.RiskContext{
 		HookType:   "on_context",
 		Provenance: "rag",
 		Payload:    "some rag content",
-		Signals:    []string{"embedded_instruction"},
+		Signals:    []riskcontext.Signal{{Category: "embedded_instruction", Score: 0.65}},
 	}
 	// Run only aggregate to test threshold logic directly.
 	agg := NewAggregateStage(cfg)
@@ -134,13 +127,34 @@ func TestPipeline_MidBandSanitise(t *testing.T) {
 	}
 }
 
+func TestPipeline_MultipleSignalsCombine(t *testing.T) {
+	cfg := testConfig(true)
+	// Two signals each below sanitise threshold (0.50).
+	// Additive sum = 0.90 → should BLOCK (≥ 0.85).
+	// Max-only scoring returns 0.45 → ALLOW — the bug.
+	rc := &riskcontext.RiskContext{
+		HookType:   "on_context",
+		Provenance: "user",
+		Payload:    "some content",
+		Signals: []riskcontext.Signal{
+			{Category: "embedded_instruction", Score: 0.45},
+			{Category: "structural_anomaly", Score: 0.45},
+		},
+	}
+	agg := NewAggregateStage(cfg)
+	agg.Run(rc)
+	result := thresholdDecision(rc.Score, cfg.Thresholds)
+	if result != decision.Block {
+		t.Errorf("expected BLOCK when two signals combine above threshold, got decision=%d score=%.2f", result, rc.Score)
+	}
+}
+
 func TestPipeline_ProvenanceWeightApplied(t *testing.T) {
 	cfg := testConfig(true)
 	cfg.TrustWeights = map[string]float64{
 		"user": 1.0,
 		"rag":  0.5, // halved
 	}
-	cfg.SignalWeights["jailbreak_pattern"] = 0.9
 	pl := buildPipeline(cfg, []string{"ignore all"})
 
 	// Same payload, different provenance — rag should score lower.

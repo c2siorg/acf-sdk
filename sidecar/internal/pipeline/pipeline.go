@@ -23,8 +23,8 @@ type Result struct {
 	Decision byte
 	// Score is the final aggregated risk score (0.0–1.0).
 	Score float64
-	// Signals is the full list of named signals emitted during the run.
-	Signals []string
+	// Signals is the full list of structured signals emitted during the run.
+	Signals []riskcontext.Signal
 	// BlockedAt names the stage that produced the first hard block signal,
 	// or empty if no hard block occurred.
 	BlockedAt string

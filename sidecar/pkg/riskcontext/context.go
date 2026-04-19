@@ -4,6 +4,14 @@
 // field is null in v1 and populated by the TTL state store in v2.
 package riskcontext
 
+// Signal is a single detection signal emitted by a pipeline stage.
+// Category names the signal type; Score is its contribution to the risk score (0.0–1.0).
+// This shape matches what the Rego policies expect: sig.category and sig.score.
+type Signal struct {
+	Category string  `json:"category"`
+	Score    float64 `json:"score"`
+}
+
 // RiskContext is the payload exchanged over IPC and passed through every
 // pipeline stage in the sidecar. It is JSON-serialised as the frame payload.
 type RiskContext struct {
@@ -11,9 +19,10 @@ type RiskContext struct {
 	// aggregate stage. Zero on the inbound frame from the SDK.
 	Score float64 `json:"score"`
 
-	// Signals is the list of named signals emitted by the scan stage.
+	// Signals is the list of structured signals emitted by pipeline stages.
 	// Empty on the inbound frame; populated as the pipeline runs.
-	Signals []string `json:"signals"`
+	// Each signal carries a category and score matching the Rego policy schema.
+	Signals []Signal `json:"signals"`
 
 	// Provenance identifies the origin of the payload (e.g. "user", "rag",
 	// "tool_output", "memory"). Set by the SDK before sending.
