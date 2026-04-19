@@ -5,7 +5,7 @@
 
 A Zero Trust security layer for LLM agents. Enforces policy-driven validation at every point an agent ingests input — not just at the front door.
 
-> **Status: Phase 2 complete — pipeline stages running. Phase 3 (OPA policy engine) next.**
+ **Status: Phase 2 complete — pipeline stages running. Phase 3 (OPA policy engine) next.**
 
 ---
 
@@ -52,14 +52,14 @@ Enforcement latency: **4–8ms typical, ~10ms worst case.** Observability spans 
 ```python
 from acf import Firewall, Decision
 
-firewall = Firewall()  # connects to sidecar at /tmp/acf.sock
+firewall = Firewall()  # connects to sidecar at /tmp/acf.sock
 
 # At message ingress
 result = firewall.on_prompt(user_message)
 if result.decision == Decision.BLOCK:
-    raise ValueError("Input blocked by firewall")
+    raise ValueError("Input blocked by firewall")
 if result.decision == Decision.SANITISE:
-    user_message = result.sanitised  # use scrubbed version
+    user_message = result.sanitised  # use scrubbed version
 
 # Before RAG injection
 chunks = firewall.on_context(retrieved_docs)
@@ -68,12 +68,12 @@ safe_chunks = [c.sanitised for c in chunks if c.decision != Decision.BLOCK]
 # Before tool execution
 result = firewall.on_tool_call(tool_name, tool_params)
 if result.decision == Decision.BLOCK:
-    raise ToolException("Tool call blocked by firewall")
+    raise ToolException("Tool call blocked by firewall")
 
 # Before memory write
 result = firewall.on_memory(key, value, op="write")
 if result.decision != Decision.ALLOW:
-    raise MemoryException("Memory write blocked by firewall")
+    raise MemoryException("Memory write blocked by firewall")
 ```
 
 ### LangGraph adapter
@@ -129,13 +129,13 @@ Policies are Rego files, hot-reloadable without restarting the sidecar. Logic an
 
 ```
 policies/v1/
-├── prompt.rego          instruction override · role escalation · jailbreak
-├── context.rego         source trust · embedded instruction · structural anomaly
-├── tool.rego            allowlist · shell metachar · path traversal · network
-├── memory.rego          HMAC stamp/verify · write scan · provenance
+├── prompt.rego          instruction override · role escalation · jailbreak
+├── context.rego         source trust · embedded instruction · structural anomaly
+├── tool.rego            allowlist · shell metachar · path traversal · network
+├── memory.rego          HMAC stamp/verify · write scan · provenance
 └── data/
-    ├── policy_config.yaml         thresholds · allowlists · trust weights
-    └── jailbreak_patterns.json    versioned pattern library
+    ├── policy_config.yaml         thresholds · allowlists · trust weights
+    └── jailbreak_patterns.json    versioned pattern library
 ```
 
 Test policies with `make opa-test` — runs the full Rego test suite using `opa test`.
@@ -146,7 +146,7 @@ Test policies with `make opa-test` — runs the full Rego test suite using `opa 
 
 ### Prerequisites
 
-- Go 1.22+
+- Go 1.25+;
 - Python 3.10+
 - [OPA](https://www.openpolicyagent.org/docs/latest/#running-opa) (for policy tests, Phase 3+)
 
@@ -184,7 +184,7 @@ pip install -e sdk/python
 ```python
 from acf import Firewall, Decision
 
-fw = Firewall()  # reads ACF_HMAC_KEY and connects to /tmp/acf.sock
+fw = Firewall()  # reads ACF_HMAC_KEY and connects to /tmp/acf.sock
 
 result = fw.on_prompt("hello world")
 assert result == Decision.ALLOW
@@ -201,7 +201,7 @@ cd sidecar && go test ./... -v
 cd sdk/python && python -m pytest -v
 
 # Or both via make (from repo root)
-make test            # Go tests
+make test            # Go tests
 make sdk-test-python # Python tests
 ```
 
@@ -221,14 +221,14 @@ docker compose --profile observability up -d
 
 ```
 acf-sdk/
-├── sidecar/              Go enforcement kernel (PDP)
+├── sidecar/              Go enforcement kernel (PDP)
 ├── sdk/
-│   ├── python/           Python SDK v1 — zero external dependencies
-│   └── typescript/       TypeScript SDK v2 — deferred until v1 is stable
-├── policies/v1/          Rego policies + data
-├── tests/integration/    33-payload adversarial test suite
-├── config/               Sidecar configuration
-└── docs/                 Architecture and policy authoring guides
+│   ├── python/           Python SDK v1 — zero external dependencies
+│   └── typescript/       TypeScript SDK v2 — deferred until v1 is stable
+├── policies/v1/          Rego policies + data
+├── tests/integration/    33-payload adversarial test suite
+├── config/               Sidecar configuration
+└── docs/                 Architecture and policy authoring guides
 ```
 
 ---
@@ -271,3 +271,4 @@ See [PHILOSOPHY.md](PHILOSOPHY.md) for the full design rationale. The short vers
 ## License
 
 See [LICENSE](LICENSE).
+
