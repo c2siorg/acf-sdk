@@ -146,7 +146,7 @@ Test policies with `make opa-test` — runs the full Rego test suite using `opa 
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.25+;
 - Python 3.10+
 - [OPA](https://www.openpolicyagent.org/docs/latest/#running-opa) (for policy tests, Phase 3+)
 
@@ -272,21 +272,3 @@ See [PHILOSOPHY.md](PHILOSOPHY.md) for the full design rationale. The short vers
 
 See [LICENSE](LICENSE).
 
-# ACF-SDK | Phase 1: Go Sidecar Listener
-
-This fork implements the high-performance **Sidecar Kernel** architecture.
-
-## ?? Status: Phase 1 (Baseline Implementation)
-- **Transport Layer:** Go-based Sidecar (v1.1 Binary Handshake)
-- **IPC Protocol:** Windows Named Pipes (\\\\.\\pipe\\acf_pipe)
-- **Latency Goal:** <1ms IPC overhead (Verified)
-
-### ??? How to run the Sidecar (Go 1.26+)
-```cmd
-go run cmd/sidecar/main.go
-```
-
-### ?? Project Structure
-- `/cmd/sidecar`: Go Security Kernel (The "PDP")
-- `/python/src/acf_sdk`: Python Interceptor (The "PEP")
- (docs: complete Phase 1 technical readme)

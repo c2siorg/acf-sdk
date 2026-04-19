@@ -1,9 +1,11 @@
 ﻿services:
   sidecar:
     build: 
-      context: ./sidecar
+      context: .
+      dockerfile: sidecar/Dockerfile
     volumes:
       - ./config/sidecar.yaml:/config/sidecar.yaml:ro
       - ./policies:/policies:ro
+      - /tmp:/tmp  # THIS IS THE KEY: Shared directory for the Unix Socket
     environment:
       - ACF_HMAC_KEY=${ACF_HMAC_KEY}
