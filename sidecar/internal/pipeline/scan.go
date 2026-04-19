@@ -53,7 +53,7 @@ func (s *ScanStage) Run(rc *riskcontext.RiskContext) (hardBlock bool) {
 	if s.matcher != nil && len(text) > 0 {
 		hits := s.matcher.Match([]byte(text))
 		if len(hits) > 0 {
-			rc.Signals = append(rc.Signals, "jailbreak_pattern")
+			rc.Signals = append(rc.Signals, riskcontext.Signal{Category: "jailbreak_pattern", Score: 0.9})
 		}
 	}
 
@@ -77,7 +77,7 @@ func (s *ScanStage) checkToolAllowlist(rc *riskcontext.RiskContext) {
 		}
 	}
 	if toolName != "" && !s.cfg.ToolAllowed(toolName) {
-		rc.Signals = append(rc.Signals, "tool:not_allowed")
+		rc.Signals = append(rc.Signals, riskcontext.Signal{Category: "tool:not_allowed", Score: 0.9})
 	}
 }
 
@@ -90,6 +90,6 @@ func (s *ScanStage) checkMemoryAllowlist(rc *riskcontext.RiskContext) {
 		}
 	}
 	if key != "" && !s.cfg.MemoryKeyAllowed(key) {
-		rc.Signals = append(rc.Signals, "memory:key_not_allowed")
+		rc.Signals = append(rc.Signals, riskcontext.Signal{Category: "memory:key_not_allowed", Score: 0.7})
 	}
 }

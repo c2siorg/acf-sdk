@@ -11,9 +11,6 @@ func defaultCfg() *config.Config {
 	return &config.Config{
 		ToolAllowlist:      []string{"search", "calculator"},
 		MemoryKeyAllowlist: []string{},
-		SignalWeights: map[string]float64{
-			"jailbreak_pattern": 0.9,
-		},
 	}
 }
 
@@ -37,7 +34,7 @@ func TestScan_PatternMatch(t *testing.T) {
 	s.Run(rc)
 	found := false
 	for _, sig := range rc.Signals {
-		if sig == "jailbreak_pattern" {
+		if sig.Category == "jailbreak_pattern" {
 			found = true
 		}
 	}
@@ -79,8 +76,8 @@ func TestScan_ToolAllowed(t *testing.T) {
 	}
 	s.Run(rc)
 	for _, sig := range rc.Signals {
-		if sig == "tool:not_allowed" {
-			t.Errorf("expected search to be allowed, got signal %q", sig)
+		if sig.Category == "tool:not_allowed" {
+			t.Errorf("expected search to be allowed, got signal %q", sig.Category)
 		}
 	}
 }
@@ -95,7 +92,7 @@ func TestScan_ToolNotAllowed(t *testing.T) {
 	s.Run(rc)
 	found := false
 	for _, sig := range rc.Signals {
-		if sig == "tool:not_allowed" {
+		if sig.Category == "tool:not_allowed" {
 			found = true
 		}
 	}
@@ -115,8 +112,8 @@ func TestScan_AllToolsAllowedWhenListEmpty(t *testing.T) {
 	}
 	s.Run(rc)
 	for _, sig := range rc.Signals {
-		if sig == "tool:not_allowed" {
-			t.Errorf("expected all tools allowed when allowlist empty, got signal %q", sig)
+		if sig.Category == "tool:not_allowed" {
+			t.Errorf("expected all tools allowed when allowlist empty, got signal %q", sig.Category)
 		}
 	}
 }
