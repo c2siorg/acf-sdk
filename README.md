@@ -179,6 +179,14 @@ make build && ./bin/acf-sidecar
 pip install -e sdk/python
 ```
 
+### 3b. Build the TypeScript SDK
+
+```bash
+cd sdk/typescript
+npm ci
+npm run build
+```
+
 ### 4. Send your first request
 
 ```python
@@ -199,6 +207,16 @@ cd sidecar && go test ./... -v
 
 # Python unit tests
 cd sdk/python && python -m pytest -v
+
+# TypeScript unit tests
+cd sdk/typescript && npm test
+
+# TypeScript sidecar integration tests
+cd sdk/typescript && npm run test:e2e
+# Prerequisites: export ACF_HMAC_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))") and start the sidecar in a separate shell (see step 2 above)
+
+# TypeScript/Python parity tests (against live sidecar)
+cd sdk/typescript && npm run test:parity
 
 # Or both via make (from repo root)
 make test            # Go tests
@@ -224,7 +242,7 @@ acf-sdk/
 ├── sidecar/              Go enforcement kernel (PDP)
 ├── sdk/
 │   ├── python/           Python SDK v1 — zero external dependencies
-│   └── typescript/       TypeScript SDK v2 — deferred until v1 is stable
+│   └── typescript/       TypeScript SDK v1 — frame/transport/firewall complete
 ├── policies/v1/          Rego policies + data
 ├── tests/integration/    33-payload adversarial test suite
 ├── config/               Sidecar configuration
@@ -263,6 +281,7 @@ See [PHILOSOPHY.md](PHILOSOPHY.md) for the full design rationale. The short vers
 - [Phase 1](docs/phase1.md) — wire protocol and crypto implementation
 - [Phase 2](docs/phase2.md) — pipeline stages, strict_mode switch, scoring
 - [Crypto](docs/crypto.md) — HMAC signing and nonce replay protection
+- [TypeScript SDK](sdk/typescript/README.md) — usage, test commands, troubleshooting
 - [Policy authoring](docs/policy-authoring.md) — how to write and test Rego policies
 - [Philosophy](PHILOSOPHY.md) — design principles and threat model rationale
 
