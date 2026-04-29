@@ -1,0 +1,64 @@
+rules:
+
+  # ── Instruction override ───────────────────────────────────────────────────
+  # Attacker tries to replace the system prompt or override agent instructions.
+  - id: "R-001"
+    signal: "instruction_override"
+    severity: "critical"
+    patterns:
+      - "ignore\\s+(all\\s+|previous\\s+|prior\\s+)?instructions"
+      - "forget\\s+(all\\s+previous\\s+|your\\s+|all\\s+|previous\\s+)?instructions"
+      - "disregard\\s+(your\\s+|all\\s+|previous\\s+)?instructions"
+      - "override\\s+(your\\s+|all\\s+|previous\\s+)?instructions"
+
+  - id: "R-002"
+    signal: "instruction_override"
+    severity: "critical"
+    patterns:
+      - "ignore your system prompt"
+      - "your (real|true|actual) instructions are"
+      - "new instructions:"
+      - "updated instructions:"
+
+  # ── Role escalation ────────────────────────────────────────────────────────
+  - id: "R-003"
+    signal: "role_escalation"
+    severity: "high"
+    patterns:
+      - "you are now (a |an )?(different|unrestricted|unlimited|new)"
+      - "pretend (you are|to be).{0,30}(unrestricted|unlimited|no restrictions)"
+      - "act as.{0,30}(unrestricted|unlimited|no restrictions)"
+      - "roleplay as"
+
+  # ── Jailbreak patterns ─────────────────────────────────────────────────────
+  - id: "R-004"
+    signal: "jailbreak_pattern"
+    severity: "critical"
+    patterns:
+      - "\\bDAN\\b"
+      - "developer mode"
+      - "jailbreak mode"
+      - "do anything now"
+      - "enable (developer|jailbreak) mode"
+      - "you have no restrictions"
+      - "you have no guidelines"
+
+  # ── Shell metacharacters ───────────────────────────────────────────────────
+  - id: "R-005"
+    signal: "shell_metachar"
+    severity: "high"
+    patterns:
+      - "[;&|`]\\s*(rm|cat|wget|curl|bash|sh|python|exec)"
+      - "\\.\\./\\.\\./"
+      - "\\$\\([^)]+\\)"
+
+  # ── Embedded instructions ──────────────────────────────────────────────────
+  - id: "R-006"
+    signal: "embedded_instruction"
+    severity: "medium"
+    patterns:
+      - "<!--.*instruct"
+      - "\\[SYSTEM\\]"
+      - "<system>"
+      - "###\\s*(instruction|system)"
+      - "\\[INST\\]"
