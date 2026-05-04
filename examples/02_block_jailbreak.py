@@ -1,9 +1,21 @@
 """
 Example 02 — Jailbreak patterns: BLOCK
 
-Direct prompt injection attempts. The Aho-Corasick scanner matches these
-against jailbreak_patterns.json. Signal: jailbreak_pattern (weight 0.9).
-Provenance: user (trust weight 1.0). Score: 0.9 >= block_threshold 0.85 → BLOCK.
+Direct prompt injection attempts caught by the Aho-Corasick lexical scanner
+and blocked by the OPA prompt policy.
+
+Pipeline path:
+  normalise  → strips encoding / zero-width chars / unicode confusables
+  scan       → Aho-Corasick matches jailbreak_patterns.json
+               emits signal: {category: "jailbreak_pattern", score: 0.9}
+  aggregate  → score = 0.9 × user trust weight (1.0) = 0.90
+  prompt.rego → rule fires:
+                  decision := "BLOCK" if {
+                      sig.category == "jailbreak_pattern"
+                      sig.score >= 0.7   ← 0.9 satisfies this
+                  }
+
+Expected decision: BLOCK for all payloads.
 """
 
 from acf import Firewall, Decision
@@ -28,6 +40,7 @@ attacks = [
 ]
 
 print("=== 02 — Jailbreak attacks (expect BLOCK) ===\n")
+print("Rego path: jailbreak_pattern signal (score 0.9) >= 0.7 → prompt.rego BLOCK\n")
 
 all_passed = True
 for attack in attacks:
@@ -35,7 +48,7 @@ for attack in attacks:
     status = "PASS" if result == Decision.BLOCK else "FAIL"
     if result != Decision.BLOCK:
         all_passed = False
-    print(f"  [{status}] {attack[:60]!r}{'...' if len(attack) > 60 else ''}")
+    print(f"  [{status}] {attack[:65]!r}{'...' if len(attack) > 65 else ''}")
     print(f"         → {result}")
 
 print()

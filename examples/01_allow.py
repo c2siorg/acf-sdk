@@ -1,8 +1,14 @@
 """
-Example 01 — Clean prompt: ALLOW
+Example 01 — Clean prompts: ALLOW
 
-A normal user message with no threats. Expected decision: ALLOW.
-Score should be 0.0 (no signals fired).
+Demonstrates the happy path. Normal user messages with no threat signals.
+
+Rego path (prompt.rego):
+  - No signals fire in the scan stage
+  - score = 0.0
+  - default decision := "ALLOW"
+
+Expected decision: ALLOW for all prompts.
 """
 
 from acf import Firewall, Decision
@@ -17,6 +23,7 @@ prompts = [
 ]
 
 print("=== 01 — Clean prompts (expect ALLOW) ===\n")
+print("Rego path: no signals → score 0.0 → prompt.rego default ALLOW\n")
 
 all_passed = True
 for prompt in prompts:
