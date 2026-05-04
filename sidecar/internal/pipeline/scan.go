@@ -19,6 +19,12 @@ import (
 	"github.com/acf-sdk/sidecar/pkg/riskcontext"
 )
 
+// shellMetachars are characters that allow command chaining or injection in shells.
+var shellMetachars = []string{";", "&&", "||", "|", "`", "$(", "${", " & ", ">", "<"}
+
+// pathTraversalPatterns are sequences used to escape a directory boundary.
+var pathTraversalPatterns = []string{"../", "..\\", "/..", "\\.."}
+
 // ScanStage runs lexical pattern matching and allowlist checks.
 type ScanStage struct {
 	cfg      *config.Config
@@ -61,6 +67,7 @@ func (s *ScanStage) Run(rc *riskcontext.RiskContext) (hardBlock bool) {
 	switch rc.HookType {
 	case "on_tool_call":
 		s.checkToolAllowlist(rc)
+		s.checkToolDangerousParams(rc)
 	case "on_memory":
 		s.checkMemoryAllowlist(rc)
 	}
@@ -79,6 +86,50 @@ func (s *ScanStage) checkToolAllowlist(rc *riskcontext.RiskContext) {
 	if toolName != "" && !s.cfg.ToolAllowed(toolName) {
 		rc.Signals = append(rc.Signals, riskcontext.Signal{Category: "tool:not_allowed"})
 	}
+}
+
+// checkToolDangerousParams scans all string values in the tool params for shell
+// metacharacters and path traversal sequences, emitting signals independently.
+func (s *ScanStage) checkToolDangerousParams(rc *riskcontext.RiskContext) {
+	m, ok := rc.Payload.(map[string]any)
+	if !ok {
+		return
+	}
+	params, ok := m["params"].(map[string]any)
+	if !ok {
+		return
+	}
+
+	combined := flattenStrings(params)
+	lower := strings.ToLower(combined)
+
+	for _, seq := range shellMetachars {
+		if strings.Contains(lower, seq) {
+			rc.Signals = append(rc.Signals, riskcontext.Signal{Category: "shell_metacharacter"})
+			break
+		}
+	}
+
+	for _, seq := range pathTraversalPatterns {
+		if strings.Contains(lower, seq) {
+			rc.Signals = append(rc.Signals, riskcontext.Signal{Category: "path_traversal"})
+			break
+		}
+	}
+}
+
+// flattenStrings recursively collects all string leaf values from a map.
+func flattenStrings(m map[string]any) string {
+	var parts []string
+	for _, v := range m {
+		switch val := v.(type) {
+		case string:
+			parts = append(parts, val)
+		case map[string]any:
+			parts = append(parts, flattenStrings(val))
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // checkMemoryAllowlist emits a signal if the memory key is not in the allowlist.

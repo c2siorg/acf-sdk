@@ -1,0 +1,53 @@
+# socket_path is auto-detected by platform — leave unset unless you need to override.
+# Linux/macOS default: /tmp/acf.sock
+# Windows default:     \\.\pipe\acf
+# socket_path: /tmp/acf.sock
+policy_dir: ../policies/v1
+log_level: info
+
+pipeline:
+  strict_mode: true             # false = run all stages even on hard block (debug/audit mode)
+
+thresholds:
+  block_score: 0.85             # risk score >= this → BLOCK
+  sanitise_score: 0.50          # risk score >= this → SANITISE (used by OPA in Phase 3)
+
+trust_weights:
+  user_input: 1.0               # highest — direct prompt injection risk
+  user: 1.0
+  tool_output: 0.8
+  rag_chunk: 0.7
+  rag: 0.7
+  memory_read: 0.6
+  memory: 0.6
+
+tool_allowlist:                 # restrict to known-safe tools; empty = block all (fail-closed); omit key = allow all
+  - search
+  - calculator
+  - get_weather
+  - read_file
+
+memory_key_allowlist:           # restrict to known-safe memory keys; empty = allow all
+  - user_preferences
+  - session_context
+  - conversation_summary
+
+signal_weights:
+  jailbreak_pattern: 0.9
+  instruction_override: 0.85
+  role_escalation: 0.8
+  shell_metacharacter: 0.75
+  path_traversal: 0.75
+  embedded_instruction: 0.65
+  structural_anomaly: 0.40
+  hmac_invalid: 1.0
+  tool:not_allowed: 0.9
+  memory:key_not_allowed: 0.7
+  validate:invalid_hook_type: 1.0
+  validate:missing_provenance: 0.9
+  validate:nil_payload: 1.0
+
+otel:
+  enabled: false
+  endpoint: ""                  # e.g. http://localhost:4318/v1/traces (OTLP HTTP)
+  service_name: acf-sidecar

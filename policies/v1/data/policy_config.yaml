@@ -12,16 +12,22 @@ trust_weights:
   rag_chunk: 0.7
   memory_read: 0.6
 
-tool_allowlist: []       # populate with permitted tool names e.g. ["search", "calculator"]
+tool_allowlist:          # tools permitted by allowlist gate; empty = block all; omit key = allow all
+  - search
+  - calculator
+  - get_weather
+  - read_file
 
-memory_key_allowlist: [] # populate with permitted memory keys; empty = allow all
+memory_key_allowlist: [] # permitted memory keys; empty = allow all
 
 signal_weights:          # per-signal contribution to risk score
   jailbreak_pattern: 0.9
   instruction_override: 0.85
   role_escalation: 0.8
-  shell_metachar: 0.75
+  shell_metacharacter: 0.75   # was shell_metachar — aligned with tool.rego category name
   path_traversal: 0.75
   embedded_instruction: 0.65
   structural_anomaly: 0.40
   hmac_invalid: 1.0      # always hard block
+  tool:not_allowed: 0.9
+  memory:key_not_allowed: 0.7

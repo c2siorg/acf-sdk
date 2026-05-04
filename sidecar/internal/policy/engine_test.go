@@ -156,21 +156,19 @@ func TestEngine_OnContext_BLOCK_StructuralAnomaly(t *testing.T) {
 
 func TestEngine_OnToolCall_DefaultBLOCK_WhenNotOnAllowlist(t *testing.T) {
 	eng := newTestEngine(t)
-	// policy_config.yaml has tool_allowlist: [] (empty array).
-	// In OPA, an empty array is truthy — `not data.config.tool_allowlist` is false.
-	// The tool is not in the list → _tool_is_permitted fails → falls to default BLOCK.
+	// policy_config.yaml has a populated tool_allowlist (search, calculator, etc).
+	// "web_browser" is not on the list → _tool_is_permitted fails → default BLOCK.
 	rc := &riskcontext.RiskContext{
 		HookType:   "on_tool_call",
 		Provenance: "user",
 		Score:      0.0,
 		Signals:    nil,
-		Payload:    map[string]any{"name": "search", "args": "weather"},
+		Payload:    map[string]any{"name": "web_browser", "params": map[string]any{"url": "https://example.com"}},
 	}
 	decision, _, err := eng.Evaluate(rc)
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
-	// Empty array allowlist means no tool passes — tool.rego is fail-closed.
 	if decision != "BLOCK" {
 		t.Errorf("expected BLOCK when tool not in allowlist, got %q", decision)
 	}
