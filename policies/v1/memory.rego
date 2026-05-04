@@ -108,3 +108,7 @@ _has_content_scan_signal if {
     sig.category == "content_scan"
     sig.score >= 0.5
 }
+_has_content_scan_signal if {
+    some sig in input.signals
+    sig.category == "jailbreak_pattern"
+}
