@@ -75,9 +75,6 @@ _tool_is_permitted if {
 _tool_is_permitted if {
     not data.config.tool_allowlist
 }
-_tool_is_permitted if {
-    count(data.config.tool_allowlist) == 0
-}
 
 # Destination allowlist: destination must be listed, or no destination
 # in the request, or no allowlist configured
