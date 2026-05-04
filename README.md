@@ -270,6 +270,7 @@ See [PHILOSOPHY.md](PHILOSOPHY.md) for the full design rationale. The short vers
 - [Crypto](docs/crypto.md) — HMAC signing and nonce replay protection
 - [Policy authoring](docs/policy-authoring.md) — how to write and test Rego policies
 - [Philosophy](PHILOSOPHY.md) — design principles and threat model rationale
+- [Implementation log](docs/implementation_log.md) — chronological record of implementation decisions, trade-offs, and corrections
 
 ---
 
