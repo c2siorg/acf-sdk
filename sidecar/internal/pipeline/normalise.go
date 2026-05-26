@@ -14,6 +14,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -74,10 +75,17 @@ func payloadText(payload any) string {
 		return v
 	case map[string]any:
 		// For structured payloads (on_tool_call, on_context), concatenate all
-		// string values for scanning purposes.
+		// string values in sorted key order for a deterministic CanonicalText.
+		// Go map iteration is random — without sorting, the same payload can
+		// produce different CanonicalText across runs, causing flaky scan results.
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
 		var parts []string
-		for _, val := range v {
-			if s, ok := val.(string); ok {
+		for _, k := range keys {
+			if s, ok := v[k].(string); ok {
 				parts = append(parts, s)
 			}
 		}

@@ -75,6 +75,43 @@ func TestNormalise_OriginalPayloadUnchanged(t *testing.T) {
 	}
 }
 
+func TestNormalise_MapPayloadDeterministic(t *testing.T) {
+	n := NewNormaliseStage()
+	payload := map[string]any{
+		"name": "shell",
+		"args": "rm -rf /",
+	}
+	// Run 10 times — CanonicalText must be identical every time.
+	var first string
+	for i := 0; i < 10; i++ {
+		rc := &riskcontext.RiskContext{Payload: payload}
+		n.Run(rc)
+		if i == 0 {
+			first = rc.CanonicalText
+			continue
+		}
+		if rc.CanonicalText != first {
+			t.Errorf("non-deterministic CanonicalText: run 0 got %q, run %d got %q", first, i, rc.CanonicalText)
+		}
+	}
+}
+
+func TestNormalise_MapPayloadSortedKeyOrder(t *testing.T) {
+	n := NewNormaliseStage()
+	rc := &riskcontext.RiskContext{
+		Payload: map[string]any{
+			"name": "shell",
+			"args": "rm -rf /",
+		},
+	}
+	n.Run(rc)
+	// keys sorted: "args" < "name" → values joined in that order
+	want := "rm -rf / shell"
+	if rc.CanonicalText != want {
+		t.Errorf("expected %q, got %q", want, rc.CanonicalText)
+	}
+}
+
 func TestNormalise_MapPayload(t *testing.T) {
 	n := NewNormaliseStage()
 	rc := &riskcontext.RiskContext{
