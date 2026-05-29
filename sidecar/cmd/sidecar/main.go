@@ -55,7 +55,7 @@ func main() {
 	// 4. Load jailbreak patterns.
 	patterns, err := config.LoadPatterns(cfg.PolicyDir)
 	if err != nil {
-		log.Printf("sidecar: warning — could not load jailbreak patterns: %v (scan stage will run with no patterns)", err)
+		log.Printf("sidecar: warning - could not load jailbreak patterns: %v (scan stage will run with no patterns)", err)
 		patterns = &config.Patterns{}
 	}
 
@@ -72,7 +72,7 @@ func main() {
 	// Signal weights live in policy_config.yaml. A table left in sidecar.yaml
 	// is ignored, so say so rather than dropping a local override silently.
 	if n := len(cfg.DeprecatedSignalWeights); n > 0 {
-		log.Printf("sidecar: warning — signal_weights in %s is ignored (%d entries); "+
+		log.Printf("sidecar: warning - signal_weights in %s is ignored (%d entries); "+
 			"weights are read from %s", configPath, n,
 			filepath.Join(cfg.PolicyDir, "data", "policy_config.yaml"))
 	}
@@ -80,11 +80,14 @@ func main() {
 	// A pattern category with no weight scores 0.0, so a match in it can never
 	// change a verdict. Surface that once at startup, not per request.
 	if missing := unweightedCategories(patterns.Entries, eng.SignalWeights()); len(missing) > 0 {
-		log.Printf("sidecar: warning — %d jailbreak pattern categories have no signal weight "+
+		log.Printf("sidecar: warning - %d jailbreak pattern categories have no signal weight "+
 			"and will score 0.0: %s", len(missing), strings.Join(missing, ", "))
 	}
 
-	// 6. Wire telemetry. Empty endpoint or missing audit path install noops.
+	// 6. Wire telemetry. An empty OTel endpoint installs a noop tracer. The audit
+	// sink defaults to stdout so the audit trail is on by default; if its path
+	// cannot be opened we fall back to a noop instead of exiting, so telemetry
+	// never blocks or crashes enforcement.
 	tracer, shutdownTracer, err := telemetry.Init(context.Background(), &telemetry.OTelConfig{
 		Endpoint:    cfg.Telemetry.OTelEndpoint,
 		ServiceName: cfg.Telemetry.ServiceName,
@@ -95,15 +98,19 @@ func main() {
 		log.Printf("sidecar: telemetry init: %v (using noop tracer)", err)
 	}
 
-	auditWriter, closeAuditFile, err := openAuditWriter(cfg.Telemetry.AuditPath)
-	if err != nil {
-		log.Fatalf("sidecar: cannot open audit sink: %v", err)
+	var audit telemetry.AuditSink = telemetry.NopSink{}
+	var closeAuditFile func() error
+	auditWriter, closeFile, auditErr := openAuditWriter(cfg.Telemetry.AuditPath)
+	if auditErr != nil {
+		log.Printf("sidecar: cannot open audit sink: %v (audit logging disabled)", auditErr)
+	} else {
+		closeAuditFile = closeFile
+		buffer := cfg.Telemetry.AuditBuffer
+		if buffer <= 0 {
+			buffer = 1024
+		}
+		audit = telemetry.NewAsyncSink(auditWriter, buffer)
 	}
-	buffer := cfg.Telemetry.AuditBuffer
-	if buffer <= 0 {
-		buffer = 1024
-	}
-	audit := telemetry.NewAsyncSink(auditWriter, buffer)
 
 	// 7. Build the enforcement pipeline.
 	pl := pipeline.NewWithOptions(cfg, []pipeline.Stage{
