@@ -5,8 +5,11 @@ Phase 2 introduces two telemetry surfaces on the sidecar:
 1. OpenTelemetry spans per pipeline run plus one child span per stage
 2. A structured JSON audit log with one line per enforcement decision
 
-Both are optional. An empty telemetry block installs noop sinks and the
-enforcement path is byte-for-byte identical to the pre-telemetry sidecar.
+Both are decoupled from enforcement: the decision the PDP returns is identical
+whether telemetry is on or off. An empty `otel_endpoint` installs a noop tracer.
+The audit log defaults to stdout so the audit trail is on by default; set
+`audit_path` to redirect it to a file, and if that path cannot be opened the sink
+falls back to a noop rather than stopping the sidecar.
 
 ## Running the local stack
 
@@ -45,13 +48,25 @@ pipeline.Run              hook_type, provenance, decision, score, duration_ms
 ├── stage.validate        signals.added, hard_block
 ├── stage.normalise       signals.added, hard_block
 ├── stage.scan            signals.added, hard_block
-└── stage.aggregate       signals.added, hard_block
+├── stage.aggregate       signals.added, hard_block
+└── opa.evaluate          opa.input.hook_type, opa.input.score, opa.input.signals,
+                          opa.output.decision, opa.output.sanitise_targets
 ```
 
 `signals.added` is the number of new signal names the stage emitted during
 the run. `hard_block` is true when the stage tripped a hard block signal.
 Root span attributes are populated after stage iteration finishes so they
 reflect the final decision rather than intermediate state
+
+`opa.evaluate` wraps the policy decision. Its `opa.input.*` attributes record
+what the pipeline hands OPA (the hook type, aggregate score, and signal count)
+and its `opa.output.*` attributes record what OPA returns (the decision and how
+many sanitise targets it declared). The span is created whenever an OPA
+evaluator is configured, and on an evaluator error it records the error before
+the pipeline falls back to threshold scoring. It is skipped only when no
+evaluator is set, or when a strict-mode hard block short-circuits before the
+decision step. As with every span, only metadata is recorded, never raw payload
+or canonical text
 
 The sampler is `ParentBased(TraceIDRatioBased(sample_ratio))`. When the
 caller passes a context that already carries a sampled trace (for example
