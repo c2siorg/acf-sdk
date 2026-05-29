@@ -66,7 +66,10 @@ func main() {
 	defer eng.Stop()
 	log.Printf("sidecar: OPA engine ready (policy_dir=%s)", cfg.PolicyDir)
 
-	// 6. Wire telemetry. Empty endpoint or missing audit path install noops.
+	// 6. Wire telemetry. An empty OTel endpoint installs a noop tracer. The audit
+	// sink defaults to stdout so the audit trail is on by default; if its path
+	// cannot be opened we fall back to a noop instead of exiting, so telemetry
+	// never blocks or crashes enforcement.
 	tracer, shutdownTracer, err := telemetry.Init(context.Background(), &telemetry.OTelConfig{
 		Endpoint:    cfg.Telemetry.OTelEndpoint,
 		ServiceName: cfg.Telemetry.ServiceName,
@@ -77,15 +80,19 @@ func main() {
 		log.Printf("sidecar: telemetry init: %v (using noop tracer)", err)
 	}
 
-	auditWriter, closeAuditFile, err := openAuditWriter(cfg.Telemetry.AuditPath)
-	if err != nil {
-		log.Fatalf("sidecar: cannot open audit sink: %v", err)
+	var audit telemetry.AuditSink = telemetry.NopSink{}
+	var closeAuditFile func() error
+	auditWriter, closeFile, auditErr := openAuditWriter(cfg.Telemetry.AuditPath)
+	if auditErr != nil {
+		log.Printf("sidecar: cannot open audit sink: %v (audit logging disabled)", auditErr)
+	} else {
+		closeAuditFile = closeFile
+		buffer := cfg.Telemetry.AuditBuffer
+		if buffer <= 0 {
+			buffer = 1024
+		}
+		audit = telemetry.NewAsyncSink(auditWriter, buffer)
 	}
-	buffer := cfg.Telemetry.AuditBuffer
-	if buffer <= 0 {
-		buffer = 1024
-	}
-	audit := telemetry.NewAsyncSink(auditWriter, buffer)
 
 	// 7. Build the enforcement pipeline.
 	pl := pipeline.NewWithOptions(cfg, []pipeline.Stage{

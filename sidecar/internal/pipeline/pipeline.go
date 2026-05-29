@@ -7,10 +7,9 @@
 // final decision is made. Non-strict mode is useful for debugging, auditing,
 // and policy development.
 //
-// Every run is wrapped in a root span with one child span per stage and one
-// span around the OPA evaluation that records what is sent to OPA and the
-// decision it returns. Telemetry is emitted after the decision and never blocks
-// the enforcement path; nil sinks fall back to noops.
+// Every run is wrapped in a root span, with a child span per stage and a span
+// around the OPA evaluation. Telemetry is emitted after the decision and never
+// blocks the enforcement path; nil sinks fall back to noops.
 package pipeline
 
 import (
@@ -185,10 +184,10 @@ func (p *Pipeline) RunContext(ctx context.Context, rc *riskcontext.RiskContext) 
 	return result
 }
 
-// decide produces the final decision after the stages have run. When an OPA
-// evaluator is configured it is consulted inside an "opa.evaluate" span that
-// records what is sent to OPA and the decision returned; on evaluator error it
-// falls back to threshold scoring. With no evaluator it is threshold scoring.
+// decide returns the final decision after the stages have run. With an OPA
+// evaluator configured it calls OPA inside an "opa.evaluate" span and falls back
+// to threshold scoring if OPA errors. Without an evaluator it uses threshold
+// scoring directly.
 func (p *Pipeline) decide(ctx context.Context, rc *riskcontext.RiskContext) (byte, []byte) {
 	if p.evaluator == nil {
 		return thresholdDecision(rc.Score, p.cfg.Thresholds), nil
@@ -253,9 +252,9 @@ func (p *Pipeline) emitAudit(sc trace.SpanContext, rc *riskcontext.RiskContext, 
 	p.audit.Emit(entry)
 }
 
-// signalCategories projects the signal list down to its category names for the
-// audit log. Raw scores are omitted; the audit record carries the aggregate
-// score separately.
+// signalCategories pulls the category names out of the signals for the audit
+// log. Raw scores are left out; the audit record carries the aggregate score
+// separately.
 func signalCategories(sigs []riskcontext.Signal) []string {
 	out := make([]string, 0, len(sigs))
 	for _, s := range sigs {
