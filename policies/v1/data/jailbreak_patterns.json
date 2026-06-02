@@ -1,6 +1,6 @@
 {
   "_comment": "Versioned jailbreak pattern library. Update independently of Rego rules.",
-  "_version": "2.1.0",
+  "_version": "2.1.1",
   "patterns": [
     {
       "id": "jp-001",
@@ -57,14 +57,6 @@
       "pattern": "the admin has authorized",
       "severity": "medium",
       "owasp_llm": "LLM01"
-    },
-    {
-      "id": "jp-009",
-      "category": "encoding_bypass",
-      "pattern": "aWdub3JlIHByZXZpb3VzIGluc3RydWN0aW9ucw==",
-      "severity": "high",
-      "owasp_llm": "LLM01",
-      "note": "base64 encoded 'ignore previous instructions'"
     },
     {
       "id": "jp-010",
