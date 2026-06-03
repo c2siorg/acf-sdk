@@ -1,10 +1,12 @@
 // executor.go — reads the OPA decision output, calls sanitise if needed,
 // and assembles the sanitised payload returned to the transport layer.
 // OPA declares *what* to sanitise; this file performs the actual transformation.
+
 package policy
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/acf-sdk/sidecar/pkg/riskcontext"
 )
@@ -24,17 +26,27 @@ func ApplySanitise(targets []string, rc *riskcontext.RiskContext) []byte {
 	for _, target := range targets {
 		switch target {
 		case "prompt_text", "context_chunk", "memory_value", "tool_params":
-			// Redact the canonical (normalised) text from the payload.
-			// CanonicalText is the form the scanner matched against; redacting it
-			// removes the dangerous content while keeping surrounding structure.
+			// Redact the dangerous content from the payload. The scanner matches
+			// against CanonicalText, which normalise may have rewritten (URL/Base64
+			// decode, NFKC, leetspeak, zero-width strip). When that rewrite changed
+			// the text, CanonicalText is no longer a substring of the original
+			// payload and an exact-match redaction would silently do nothing — the
+			// chunk would come back with the attack intact despite a SANITISE
+			// decision. So we only redact the canonical span when it actually
+			// appears in the payload; otherwise we redact the whole value, which is
+			// the safe choice for content already flagged as dangerous.
+			//
+			// TODO(v2): once RiskContext carries the original matched spans from
+			// the scan stage, redact those directly and drop this fallback.
 			seg := rc.CanonicalText
-			if seg == "" {
-				seg = text
+			if seg != "" && strings.Contains(text, seg) {
+				text = Redact(SanitiseRequest{
+					Text:            text,
+					MatchedSegments: []string{seg},
+				})
+			} else {
+				text = "[REDACTED]"
 			}
-			text = Redact(SanitiseRequest{
-				Text:            text,
-				MatchedSegments: []string{seg},
-			})
 		case "split_chunk":
 			// Signal to the caller that the chunk must be split before processing.
 			text = InjectPrefix(SanitiseRequest{
