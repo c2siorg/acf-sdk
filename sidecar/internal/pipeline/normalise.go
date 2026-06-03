@@ -14,6 +14,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -108,16 +109,77 @@ func decodeURL(text string) string {
 	}
 }
 
-// decodeBase64 detects and recursively decodes base64-encoded segments.
-// Stops when no decodable segment is found.
+// decodeBase64 recursively decodes base64-encoded content. Each pass first
+// tries to decode the whole payload, then falls back to decoding individual
+// base64 tokens embedded in a larger string. It loops until neither pass
+// changes the text, so nested encodings and multiple tokens are all resolved.
 func decodeBase64(text string) string {
 	for {
 		decoded := tryBase64(text)
+		if decoded == text {
+			decoded = decodeBase64Tokens(text)
+		}
 		if decoded == text {
 			return text
 		}
 		text = decoded
 	}
+}
+
+// base64TokenRe matches a run of base64 characters long enough to plausibly
+// carry an encoded instruction. Short runs are skipped to avoid touching
+// ordinary words and identifiers.
+var base64TokenRe = regexp.MustCompile(`[A-Za-z0-9+/]{16,}={0,2}`)
+
+// decodeBase64Tokens decodes base64 tokens that sit inside a larger payload,
+// which the whole-string tryBase64 pass cannot reach. Only tokens that decode
+// to a printable phrase are replaced; benign tokens (ids, hashes, opaque
+// blobs) are left as-is so canonical text for clean traffic is unchanged.
+func decodeBase64Tokens(text string) string {
+	return base64TokenRe.ReplaceAllStringFunc(text, func(tok string) string {
+		if decoded, ok := tryBase64Token(tok); ok {
+			return decoded
+		}
+		return tok
+	})
+}
+
+// tryBase64Token decodes a single token and reports whether the result looks
+// like encoded text worth scanning. It is deliberately strict: the decode must
+// be printable UTF-8 and read like a phrase (a space plus a letter), which is
+// what encoded injections look like and what random base64 blobs do not.
+func tryBase64Token(tok string) (string, bool) {
+	decoded, err := base64.StdEncoding.DecodeString(tok)
+	if err != nil {
+		decoded, err = base64.RawStdEncoding.DecodeString(tok)
+		if err != nil {
+			return "", false
+		}
+	}
+	s := string(decoded)
+	if !isPrintableUTF8(s) || !looksLikePhrase(s) {
+		return "", false
+	}
+	return s, true
+}
+
+// looksLikePhrase returns true if s reads like natural-language text: it has at
+// least one space and at least one letter. This keeps the token decoder from
+// rewriting base64 that happens to decode to opaque bytes.
+func looksLikePhrase(s string) bool {
+	hasSpace, hasLetter := false, false
+	for _, r := range s {
+		switch {
+		case unicode.IsSpace(r):
+			hasSpace = true
+		case unicode.IsLetter(r):
+			hasLetter = true
+		}
+		if hasSpace && hasLetter {
+			return true
+		}
+	}
+	return false
 }
 
 // tryBase64 attempts to base64-decode text. Returns the decoded string if
