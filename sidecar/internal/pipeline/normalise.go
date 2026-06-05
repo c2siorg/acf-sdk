@@ -127,9 +127,10 @@ func decodeBase64(text string) string {
 }
 
 // base64TokenRe matches a run of base64 characters long enough to plausibly
-// carry an encoded instruction. Short runs are skipped to avoid touching
-// ordinary words and identifiers.
-var base64TokenRe = regexp.MustCompile(`[A-Za-z0-9+/]{16,}={0,2}`)
+// carry an encoded instruction. The class covers both the standard (+/) and
+// URL-safe (-_) alphabets so url-safe tokens are not skipped. Short runs are
+// left alone to avoid touching ordinary words and identifiers.
+var base64TokenRe = regexp.MustCompile(`[A-Za-z0-9+/_-]{16,}={0,2}`)
 
 // decodeBase64Tokens decodes base64 tokens that sit inside a larger payload,
 // which the whole-string tryBase64 pass cannot reach. Only tokens that decode
@@ -149,18 +150,30 @@ func decodeBase64Tokens(text string) string {
 // be printable UTF-8 and read like a phrase (a space plus a letter), which is
 // what encoded injections look like and what random base64 blobs do not.
 func tryBase64Token(tok string) (string, bool) {
-	decoded, err := base64.StdEncoding.DecodeString(tok)
-	if err != nil {
-		decoded, err = base64.RawStdEncoding.DecodeString(tok)
-		if err != nil {
-			return "", false
-		}
+	decoded, ok := decodeAnyBase64(tok)
+	if !ok {
+		return "", false
 	}
 	s := string(decoded)
 	if !isPrintableUTF8(s) || !looksLikePhrase(s) {
 		return "", false
 	}
 	return s, true
+}
+
+// decodeAnyBase64 tries the standard and URL-safe alphabets, padded and
+// unpadded, and returns the first that decodes. URL-safe (-_) is the case the
+// standard-only decoder missed, where a url-safe token slipped past the scanner.
+func decodeAnyBase64(tok string) ([]byte, bool) {
+	for _, enc := range []*base64.Encoding{
+		base64.StdEncoding, base64.RawStdEncoding,
+		base64.URLEncoding, base64.RawURLEncoding,
+	} {
+		if decoded, err := enc.DecodeString(tok); err == nil {
+			return decoded, true
+		}
+	}
+	return nil, false
 }
 
 // looksLikePhrase returns true if s reads like natural-language text: it has at
