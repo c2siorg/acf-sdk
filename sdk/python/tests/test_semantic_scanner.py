@@ -20,6 +20,12 @@ import time
 
 import pytest
 
+# Scanner deps are an optional [scanners] extra. Skip the whole module if
+# they're not installed so the base SDK test suite still runs in CI.
+pytest.importorskip("numpy", reason="scanner tests require the [scanners] extra")
+pytest.importorskip("pydantic", reason="scanner tests require the [scanners] extra")
+pytest.importorskip("sklearn", reason="scanner tests require the [scanners] extra")
+
 from acf.scanners import (
     InputType,
     ScanAction,
