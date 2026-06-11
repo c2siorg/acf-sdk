@@ -15,6 +15,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -202,6 +204,44 @@ func TestAdversarialPayloads(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCoverageMatrix prints how many payloads hit each hook and verdict.
+// Reporting only, it asserts nothing.
+func TestCoverageMatrix(t *testing.T) {
+	logCoverage(t, loadCorpus(t))
+}
+
+// logCoverage prints the hook/verdict counts and the categories the corpus hits.
+func logCoverage(t *testing.T, all []payloadCase) {
+	t.Helper()
+
+	// Fixed hook order so an uncovered hook shows a zero row instead of vanishing.
+	hooks := []string{"on_prompt", "on_context", "on_tool_call", "on_memory"}
+
+	type cell struct{ hook, verdict string }
+	counts := map[cell]int{}
+	cats := map[string]bool{}
+	for _, pc := range all {
+		counts[cell{pc.HookType, pc.Expected}]++
+		cats[pc.Category] = true
+	}
+
+	catList := make([]string, 0, len(cats))
+	for c := range cats {
+		catList = append(catList, c)
+	}
+	sort.Strings(catList)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nadversarial coverage: %d payloads across %d categories\n", len(all), len(cats))
+	fmt.Fprintf(&b, "%-14s %6s %9s %6s\n", "hook", "ALLOW", "SANITISE", "BLOCK")
+	for _, h := range hooks {
+		fmt.Fprintf(&b, "%-14s %6d %9d %6d\n", h,
+			counts[cell{h, "ALLOW"}], counts[cell{h, "SANITISE"}], counts[cell{h, "BLOCK"}])
+	}
+	fmt.Fprintf(&b, "categories: %s\n", strings.Join(catList, ", "))
+	t.Log(b.String())
 }
 
 func harnessConfig(socket, policyDir string) string {
