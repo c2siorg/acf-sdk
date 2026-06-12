@@ -99,14 +99,41 @@ class TfidfBackend(EmbeddingBackend):
         self._n_components = n_components
 
     def fit(self, corpus: List[str]) -> None:
-        """Fit the TF-IDF + SVD pipeline on the attack corpus."""
+        """Fit the TF-IDF + SVD pipeline on the attack corpus.
+
+        SVD requires n_components < min(n_samples, n_features). With a small
+        attack library or sparse vocabulary, the requested 128 components can
+        exceed what the TF-IDF matrix actually has, and sklearn raises
+        ValueError. Clamp dynamically based on the matrix shape so the backend
+        is robust to corpus size. (Reported by @kavishkafer.)
+        """
+        from sklearn.decomposition import TruncatedSVD
+
         tfidf_matrix = self._vectorizer.fit_transform(corpus)
+        n_samples, n_features = tfidf_matrix.shape
+        max_components = min(n_samples, n_features) - 1
+        effective_components = min(self._n_components, max(max_components, 1))
+
+        if effective_components != self._n_components:
+            logger.warning(
+                "TfidfBackend: clamping n_components %d → %d "
+                "(corpus shape %d×%d)",
+                self._n_components,
+                effective_components,
+                n_samples,
+                n_features,
+            )
+            self._svd = TruncatedSVD(
+                n_components=effective_components, random_state=42
+            )
+
         self._svd.fit(tfidf_matrix)
         self._fitted = True
+        self._effective_components = effective_components
         logger.info(
             "TfidfBackend fitted: %d docs, %d components",
-            len(corpus),
-            self._n_components,
+            n_samples,
+            effective_components,
         )
 
     def encode(self, texts: List[str]) -> np.ndarray:
