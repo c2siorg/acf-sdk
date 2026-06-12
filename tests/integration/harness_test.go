@@ -45,7 +45,14 @@ type payloadCase struct {
 	Provenance string          `json:"provenance"`
 	Payload    json.RawMessage `json:"payload"`
 	Expected   string          `json:"expected"`
+	Desired    string          `json:"desired,omitempty"`
+	Gap        string          `json:"gap,omitempty"`
+	Closed     bool            `json:"closed,omitempty"`
 }
+
+// isGap reports whether this case is a gap probe: one carrying a Desired verdict
+// that the live pipeline does not yet reach.
+func (pc payloadCase) isGap() bool { return pc.Desired != "" }
 
 func TestMain(m *testing.M) {
 	os.Exit(run(m))
@@ -194,8 +201,14 @@ func loadCorpus(t *testing.T) []payloadCase {
 	return c.Payloads
 }
 
+// TestAdversarialPayloads is the strict regression baseline: cases the live
+// verdict already matches. Gap probes are skipped here and asserted tolerantly
+// in TestGapProbes.
 func TestAdversarialPayloads(t *testing.T) {
 	for _, pc := range loadCorpus(t) {
+		if pc.isGap() {
+			continue
+		}
 		pc := pc
 		t.Run(pc.ID, func(t *testing.T) {
 			got := send(t, pc)
@@ -206,14 +219,58 @@ func TestAdversarialPayloads(t *testing.T) {
 	}
 }
 
-// TestCoverageMatrix prints how many payloads hit each hook and verdict.
-// Reporting only, it asserts nothing.
-func TestCoverageMatrix(t *testing.T) {
-	logCoverage(t, loadCorpus(t))
+// TestGapProbes covers cases the pipeline is currently too lenient on. A probe
+// passes whether the gap is still open (got == Expected) or a later fix has
+// tightened it to Desired, so closing a gap never breaks CI. It fails only on an
+// unexpected third verdict. Once a fix lands, the fixing PR sets "closed": true
+// so the probe then asserts strictly on Desired and guards against regression.
+func TestGapProbes(t *testing.T) {
+	for _, pc := range loadCorpus(t) {
+		if !pc.isGap() {
+			continue
+		}
+		pc := pc
+		t.Run(pc.ID, func(t *testing.T) {
+			got := send(t, pc)
+			if pc.Closed {
+				if got != pc.Desired {
+					t.Errorf("[%s/%s] closed gap regressed: want %s, got %s. %s",
+						pc.HookType, pc.Category, pc.Desired, got, pc.Gap)
+				}
+				return
+			}
+			switch got {
+			case pc.Expected:
+				t.Logf("known gap open [%s/%s]: got %s, desired %s. %s",
+					pc.HookType, pc.Category, got, pc.Desired, pc.Gap)
+			case pc.Desired:
+				t.Logf("gap closed [%s/%s]: now %s (was %s). set \"closed\": true on this probe in the fixing PR. %s",
+					pc.HookType, pc.Category, got, pc.Expected, pc.Gap)
+			default:
+				t.Errorf("[%s/%s] unexpected verdict %s (wanted open-gap %s or fixed %s)",
+					pc.HookType, pc.Category, got, pc.Expected, pc.Desired)
+			}
+		})
+	}
 }
 
-// logCoverage prints the hook/verdict counts and the categories the corpus hits.
-func logCoverage(t *testing.T, all []payloadCase) {
+// TestCoverageMatrix prints the baseline hook/verdict spread plus the per-hook
+// open-gap count. Reporting only, it asserts nothing.
+func TestCoverageMatrix(t *testing.T) {
+	var baseline, gaps []payloadCase
+	for _, pc := range loadCorpus(t) {
+		if pc.isGap() {
+			gaps = append(gaps, pc)
+		} else {
+			baseline = append(baseline, pc)
+		}
+	}
+	logCoverage(t, baseline, gaps)
+}
+
+// logCoverage prints the baseline hook/verdict counts, the per-hook open-gap
+// count, and the categories the corpus hits.
+func logCoverage(t *testing.T, baseline, gaps []payloadCase) {
 	t.Helper()
 
 	// Fixed hook order so an uncovered hook shows a zero row instead of vanishing.
@@ -221,10 +278,17 @@ func logCoverage(t *testing.T, all []payloadCase) {
 
 	type cell struct{ hook, verdict string }
 	counts := map[cell]int{}
+	gapByHook := map[string]int{}
 	cats := map[string]bool{}
-	for _, pc := range all {
+	for _, pc := range baseline {
 		counts[cell{pc.HookType, pc.Expected}]++
 		cats[pc.Category] = true
+	}
+	for _, pc := range gaps {
+		cats[pc.Category] = true
+		if !pc.Closed {
+			gapByHook[pc.HookType]++
+		}
 	}
 
 	catList := make([]string, 0, len(cats))
@@ -234,11 +298,12 @@ func logCoverage(t *testing.T, all []payloadCase) {
 	sort.Strings(catList)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "\nadversarial coverage: %d payloads across %d categories\n", len(all), len(cats))
-	fmt.Fprintf(&b, "%-14s %6s %9s %6s\n", "hook", "ALLOW", "SANITISE", "BLOCK")
+	fmt.Fprintf(&b, "\nadversarial coverage: %d baseline + %d gap probes across %d categories\n",
+		len(baseline), len(gaps), len(cats))
+	fmt.Fprintf(&b, "%-14s %6s %9s %6s %10s\n", "hook", "ALLOW", "SANITISE", "BLOCK", "open_gaps")
 	for _, h := range hooks {
-		fmt.Fprintf(&b, "%-14s %6d %9d %6d\n", h,
-			counts[cell{h, "ALLOW"}], counts[cell{h, "SANITISE"}], counts[cell{h, "BLOCK"}])
+		fmt.Fprintf(&b, "%-14s %6d %9d %6d %10d\n", h,
+			counts[cell{h, "ALLOW"}], counts[cell{h, "SANITISE"}], counts[cell{h, "BLOCK"}], gapByHook[h])
 	}
 	fmt.Fprintf(&b, "categories: %s\n", strings.Join(catList, ", "))
 	t.Log(b.String())
