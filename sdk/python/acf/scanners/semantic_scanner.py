@@ -161,14 +161,39 @@ class SemanticScanner:
 
         action = ScanAction.PROCEED
         reason = None
-        if any(sim >= self._config.block_threshold for _, sim in hits):
+
+        # Block check runs against all similarities, not just hits filtered by..
+        # default_threshold / category_thresholds. Otherwise a pattern scoring
+        # in [block_threshold, default_threshold) would be dropped before the
+        # block check ever sees it.
+        block_idx: Optional[int] = None
+        block_sim: float = 0.0
+        for idx, sim in enumerate(similarities):
+            sim_f = float(sim)
+            if sim_f >= self._config.block_threshold and sim_f > block_sim:
+                block_idx = idx
+                block_sim = sim_f
+
+        if block_idx is not None:
             action = ScanAction.SHORT_CIRCUIT_BLOCK
-            top_hit = semantic_hits[0]
+            block_category = self._pattern_categories[block_idx]
             reason = (
-                f"Semantic similarity {top_hit.similarity_score:.2f} "
-                f"to known {top_hit.matched_category} pattern "
+                f"Semantic similarity {block_sim:.2f} "
+                f"to known {block_category} pattern "
                 f"exceeds block threshold {self._config.block_threshold}"
             )
+            # If the blocking pattern wasn't already in the hits list (because it
+            # fell below the default/category threshold), surface it so the caller
+            # can see what triggered the block.
+            if not any(idx == block_idx for idx, _ in hits):
+                semantic_hits.insert(
+                    0,
+                    SemanticHit(
+                        matched_category=block_category,
+                        similarity_score=round(block_sim, 4),
+                        matched_pattern=self._pattern_texts[block_idx],
+                    ),
+                )
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
