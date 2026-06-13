@@ -53,7 +53,16 @@ signal_weights:                   # per-signal contribution to risk score (0.0â€
 # Minimum 32 bytes, hex-encoded.
 # Generate: python3 -c "import secrets; print(secrets.token_hex(32))"
 
-otel:
-  enabled: false                  # set true to emit OTel spans (Phase 4)
-  endpoint: ""                    # e.g. http://localhost:4318/v1/traces (OTLP HTTP)
+telemetry:
+  # Leave otel_endpoint empty to install a noop tracer. Accepts host:port or
+  # a full URL; path components are ignored.
+  otel_endpoint: ""               # e.g. http://otel-collector:4318
   service_name: acf-sidecar
+  sample_ratio: 1.0               # 0.0 disables span emission entirely
+  insecure: true                  # false for TLS collectors
+
+  # Audit log sink. Empty or "-" routes to stdout. Parent directories are
+  # created on startup.
+  audit_path: ""                  # e.g. /var/log/acf/audit.log
+  audit_buffer: 1024              # async channel depth
+  policy_version: v1              # stamped on every audit entry

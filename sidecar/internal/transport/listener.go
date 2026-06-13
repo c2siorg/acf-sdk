@@ -6,9 +6,11 @@
 package transport
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net"
+	"sync"
 
 	"github.com/acf-sdk/sidecar/internal/crypto"
 	"github.com/acf-sdk/sidecar/internal/pipeline"
@@ -30,9 +32,14 @@ type Config struct {
 
 // Listener wraps a platform net.Listener and handles incoming connections.
 type Listener struct {
-	cfg    Config
-	ln     net.Listener
-	stopCh chan struct{}
+	cfg       Config
+	ln        net.Listener
+	stopCh    chan struct{}
+	serveDone chan struct{}
+	handlers  sync.WaitGroup
+
+	connsMu sync.Mutex
+	conns   map[net.Conn]struct{}
 }
 
 // NewListener creates a Listener bound to cfg.Address using cfg.Connector.
@@ -53,15 +60,20 @@ func NewListener(cfg Config) (*Listener, error) {
 	}
 
 	return &Listener{
-		cfg:    cfg,
-		ln:     ln,
-		stopCh: make(chan struct{}),
+		cfg:       cfg,
+		ln:        ln,
+		stopCh:    make(chan struct{}),
+		serveDone: make(chan struct{}),
+		conns:     make(map[net.Conn]struct{}),
 	}, nil
 }
 
 // Serve enters the accept loop. Blocks until Stop is called.
 // Returns nil after a clean shutdown, or a non-nil error on unexpected failure.
+// serveDone is closed when Serve returns, so Drain can wait for the accept
+// loop to finish before waiting on handlers.
 func (l *Listener) Serve() error {
+	defer close(l.serveDone)
 	for {
 		conn, err := l.ln.Accept()
 		if err != nil {
@@ -72,24 +84,90 @@ func (l *Listener) Serve() error {
 				return err
 			}
 		}
-		go l.handleConn(conn)
+		if !l.registerConn(conn) {
+			// Stop already ran; refuse the connection instead of leaking it.
+			conn.Close()
+			continue
+		}
+		l.handlers.Add(1)
+		go func() {
+			defer l.handlers.Done()
+			l.handleConn(conn)
+		}()
 	}
 }
 
-// Stop closes the underlying listener, causing Serve to return.
+// Stop closes the listener and every accepted connection, unblocking any
+// handler stuck in a read or write. Callers that need to wait for handler
+// goroutines to return should call Drain after Stop.
 func (l *Listener) Stop() {
 	select {
 	case <-l.stopCh:
 		// already stopped
+		return
 	default:
 		close(l.stopCh)
 	}
 	l.ln.Close()
+
+	l.connsMu.Lock()
+	for c := range l.conns {
+		c.Close()
+	}
+	l.connsMu.Unlock()
+}
+
+// Drain blocks until the accept loop has exited AND every in-flight handler
+// has returned, or until ctx is done. Waiting on Serve first closes the gap
+// where a connection accepted after Stop could still register a handler
+// after handlers.Wait() has returned. Safe to call after Stop. Returns
+// ctx.Err() if the deadline hits first.
+func (l *Listener) Drain(ctx context.Context) error {
+	select {
+	case <-l.serveDone:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	done := make(chan struct{})
+	go func() {
+		l.handlers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// registerConn records a live connection so Stop can close it. Returns false
+// when the listener has already been stopped, in which case the caller
+// should drop the connection immediately rather than serve it.
+func (l *Listener) registerConn(c net.Conn) bool {
+	l.connsMu.Lock()
+	defer l.connsMu.Unlock()
+	select {
+	case <-l.stopCh:
+		return false
+	default:
+	}
+	l.conns[c] = struct{}{}
+	return true
+}
+
+func (l *Listener) deregisterConn(c net.Conn) {
+	l.connsMu.Lock()
+	delete(l.conns, c)
+	l.connsMu.Unlock()
 }
 
 // handleConn processes a single client connection.
 func (l *Listener) handleConn(conn net.Conn) {
-	defer conn.Close()
+	defer func() {
+		l.deregisterConn(conn)
+		conn.Close()
+	}()
 
 	// 1. Decode the frame header and payload.
 	rf, err := DecodeRequest(conn)
