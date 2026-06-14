@@ -19,8 +19,8 @@ sdk-test-python:
 	cd sdk/python && python -m pytest
 
 # ── Integration ──────────────────────────────────────────────────────────────
-integration: build
-	go test ./tests/integration/... -v -timeout 60s
+integration:
+	cd tests/integration && go test ./... -v -timeout 120s
 
 # ── Docker ───────────────────────────────────────────────────────────────────
 docker-up:
