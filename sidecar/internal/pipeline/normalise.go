@@ -261,6 +261,16 @@ func stripZeroWidth(text string) string {
 	}, text)
 }
 
+// normalisePattern applies only the character-level transforms that also run
+// on payloads, so the AC dictionary and CanonicalText use the same alphabet.
+// URL and base64 decoding are skipped because those are payload-specific.
+func normalisePattern(p string) string {
+	p = applyNFKC(p)
+	p = stripZeroWidth(p)
+	p = cleanLeetspeak(p)
+	return p
+}
+
 // cleanLeetspeak replaces common leet substitutions with their ASCII equivalents.
 func cleanLeetspeak(text string) string {
 	return strings.Map(func(r rune) rune {
