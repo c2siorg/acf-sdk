@@ -59,6 +59,12 @@ class Firewall:
                      out of OPA's view. Lower this when using the
                      sentence-transformer backend (which has cleaner
                      separation between attacks and benign text).
+        semantic_backend:
+                     Embedding backend for the semantic scanner. Use "tfidf"
+                     for lightweight/CI environments (no PyTorch needed) or
+                     "sentence-transformer" for production accuracy. Can also
+                     be set via ACF_SEMANTIC_SCAN_BACKEND env var (env wins).
+                     Default: "tfidf".
 
     Raises:
         FirewallError: If no HMAC key can be resolved, or if semantic
@@ -72,6 +78,7 @@ class Firewall:
         hmac_key: bytes | None = None,
         enable_semantic_scan: bool | None = None,
         semantic_signal_threshold: float = 0.85,
+        semantic_backend: str = "tfidf",
     ) -> None:
         resolved_path = (
             socket_path
@@ -114,8 +121,10 @@ class Firewall:
                     "Semantic scanning was enabled but the [scanners] extra "
                     "is not installed. Install with: pip install acf-sdk[scanners]"
                 ) from exc
-            self._semantic_scanner = SemanticScanner(backend="tfidf")
-            logger.info("acf-sdk: semantic scanner enabled (tfidf backend)")
+            env_backend = os.environ.get("ACF_SEMANTIC_SCAN_BACKEND", "").strip().lower()
+            resolved_backend = env_backend if env_backend in ("tfidf", "sentence-transformer") else semantic_backend
+            self._semantic_scanner = SemanticScanner(backend=resolved_backend)
+            logger.info("acf-sdk: semantic scanner enabled (%s backend)", resolved_backend)
 
     # ── v1 hook call sites ────────────────────────────────────────────────────
 
@@ -221,7 +230,7 @@ class Firewall:
         hook_to_input_type = {
             "on_prompt":    InputType.PROMPT,
             "on_context":   InputType.RAG_DOCUMENT,
-            "on_tool_call": InputType.TOOL_OUTPUT,
+            "on_tool_call": InputType.TOOL_CALL,
             "on_memory":    InputType.MEMORY_WRITE,
         }
         input_type = hook_to_input_type.get(hook_type, InputType.PROMPT)
