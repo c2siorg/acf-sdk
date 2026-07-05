@@ -40,7 +40,7 @@ func NewScanStage(cfg *config.Config, patterns []string) *ScanStage {
 	if len(patterns) > 0 {
 		dict := make([][]byte, len(patterns))
 		for i, p := range patterns {
-			dict[i] = []byte(strings.ToLower(p))
+			dict[i] = []byte(strings.ToLower(normalisePattern(p)))
 		}
 		s.matcher = ahocorasick.NewMatcher(dict)
 	}
