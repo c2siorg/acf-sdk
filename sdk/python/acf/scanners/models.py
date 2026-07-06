@@ -28,6 +28,7 @@ class InputType(str, Enum):
 
     PROMPT = "prompt"
     TOOL_OUTPUT = "tool_output"
+    TOOL_CALL = "tool_call"
     RAG_DOCUMENT = "rag_document"
     MEMORY_WRITE = "memory_write"
 
