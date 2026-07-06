@@ -160,6 +160,7 @@ func send(t *testing.T, pc payloadCase) string {
 		t.Fatalf("dial sidecar: %v", err)
 	}
 	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
 
 	if _, err := conn.Write(frame); err != nil {
 		t.Fatalf("write frame: %v", err)
@@ -332,7 +333,7 @@ signal_weights:
   jailbreak_pattern: 0.9
   instruction_override: 0.85
   role_escalation: 0.8
-  shell_metachar: 0.75
+  shell_metacharacter: 0.75
   path_traversal: 0.75
   embedded_instruction: 0.65
   structural_anomaly: 0.40
