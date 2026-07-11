@@ -56,3 +56,15 @@ class FirewallError(Exception):
 
 class FirewallConnectionError(FirewallError):
     """Raised when the transport cannot connect to the sidecar after all retries."""
+
+class FirewallBlocked(FirewallError):
+    """Raised by framework adapters when the firewall returns BLOCK.
+
+    Unlike a plain decision return, this propagates as a real exception so
+    it can halt an agent framework's execution flow (e.g. a LangGraph run).
+    Carries the hook that blocked and the original decision for logging.
+    """
+
+    def __init__(self, message: str, *, hook: str | None = None) -> None:
+        super().__init__(message)
+        self.hook = hook
