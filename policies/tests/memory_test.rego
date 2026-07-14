@@ -35,6 +35,17 @@ test_read_hmac_valid_allow if {
 	result == "ALLOW"
 }
 
+test_read_missing_integrity_block if {
+	result := memory.decision with input as {
+		"memory_op": "read",
+		"score": 0.0,
+		"signals": [],
+		"provenance": "agent", "session_id": "m-009", "hook_type": "on_memory",
+		"payload_size_bytes": 100,
+	}
+	result == "BLOCK"
+}
+
 # --- Detection: write-time content scan ---
 
 # A poisoned write flagged by the content scanner is stripped (SANITISE).

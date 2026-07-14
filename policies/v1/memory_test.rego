@@ -35,6 +35,29 @@ test_read_invalid_hmac_block if {
     result == "BLOCK"
 }
 
+test_read_missing_hmac_block if {
+    result := memory.decision with input as {
+        "memory_op": "read",
+        "score": 0.0,
+        "signals": [],
+        "provenance": "agent", "session_id": "s1", "hook_type": "on_memory",
+        "payload_size_bytes": 100,
+    }
+    result == "BLOCK"
+}
+
+test_read_null_hmac_block if {
+    result := memory.decision with input as {
+        "memory_op": "read",
+        "score": 0.0,
+        "signals": [],
+        "provenance": "agent", "session_id": "s1", "hook_type": "on_memory",
+        "integrity": {"hmac_valid": null},
+        "payload_size_bytes": 100,
+    }
+    result == "BLOCK"
+}
+
 # =====================================================================
 # Integrity — write-time HMAC stamp
 # =====================================================================

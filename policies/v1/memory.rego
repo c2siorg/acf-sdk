@@ -26,7 +26,7 @@ default decision := "ALLOW"
 
 decision := "BLOCK" if {
     input.memory_op == "read"
-    input.integrity.hmac_valid == false
+    not input.integrity.hmac_valid == true
 }
 
 # ---------------------------------------------------------------------
