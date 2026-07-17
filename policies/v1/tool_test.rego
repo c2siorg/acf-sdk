@@ -63,6 +63,19 @@ test_allowed_destination_passes if {
     result == "ALLOW"
 }
 
+test_no_destination_ignores_allowlist if {
+    result := tool.decision with input as {
+        "tool_name": "calculator",
+        "score": 0.1,
+        "signals": [],
+        "provenance": "sdk", "session_id": "s1", "hook_type": "on_tool_call",
+        "tool_metadata": {},
+    }
+        with data.config.tool_allowlist as ["calculator"]
+        with data.config.destination_allowlist as ["api.example.com"]
+    result == "ALLOW"
+}
+
 test_blocked_destination_denied if {
     result := tool.decision with input as {
         "tool_name": "http_request",

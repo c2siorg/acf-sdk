@@ -174,6 +174,54 @@ func TestEngine_OnToolCall_DefaultBLOCK_WhenNotOnAllowlist(t *testing.T) {
 	}
 }
 
+func TestEngine_OnToolCall_DestinationAllowlist_Blocks(t *testing.T) {
+	eng := newTestEngine(t)
+	rc := &riskcontext.RiskContext{
+		HookType:   "on_tool_call",
+		Provenance: "agent",
+		Score:      0.0,
+		Signals:    nil,
+		Payload: map[string]any{
+			"name":   "search",
+			"params": map[string]any{},
+			"metadata": map[string]any{
+				"destination": "evil.exfil.example",
+			},
+		},
+	}
+	decision, _, err := eng.Evaluate(rc)
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if decision != "BLOCK" {
+		t.Errorf("expected BLOCK for unlisted destination, got %q", decision)
+	}
+}
+
+func TestEngine_OnToolCall_DestinationAllowlist_Allows(t *testing.T) {
+	eng := newTestEngine(t)
+	rc := &riskcontext.RiskContext{
+		HookType:   "on_tool_call",
+		Provenance: "agent",
+		Score:      0.0,
+		Signals:    nil,
+		Payload: map[string]any{
+			"name":   "search",
+			"params": map[string]any{},
+			"metadata": map[string]any{
+				"destination": "api.example.com",
+			},
+		},
+	}
+	decision, _, err := eng.Evaluate(rc)
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if decision != "ALLOW" {
+		t.Errorf("expected ALLOW for listed destination, got %q", decision)
+	}
+}
+
 func TestEngine_OnMemory_BLOCK_InvalidHMAC(t *testing.T) {
 	eng := newTestEngine(t)
 	rc := &riskcontext.RiskContext{
