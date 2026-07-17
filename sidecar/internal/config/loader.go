@@ -187,10 +187,18 @@ func validate(c *Config) error {
 	return nil
 }
 
+// PatternEntry holds a single structured pattern with its metadata.
+type PatternEntry struct {
+	ID       string
+	Category string
+	Pattern  string
+}
+
 // Patterns holds the parsed jailbreak patterns for the scanner.
 type Patterns struct {
 	Version  string
-	Patterns []string
+	Patterns []string       // plain pattern strings (backward compat)
+	Entries  []PatternEntry // structured entries with id + category
 }
 
 // LoadPatterns reads and parses jailbreak_patterns.json from policyDir.
@@ -212,20 +220,29 @@ func LoadPatterns(policyDir string) (*Patterns, error) {
 	}
 
 	strs := make([]string, 0, len(raw.Patterns))
+	entries := make([]PatternEntry, 0, len(raw.Patterns))
 	skipped := 0
 	for i, p := range raw.Patterns {
 		// Try structured entry first ({"pattern": "...", ...})
 		var entry struct {
-			Pattern string `json:"pattern"`
+			ID       string `json:"id"`
+			Category string `json:"category"`
+			Pattern  string `json:"pattern"`
 		}
 		if err := json.Unmarshal(p, &entry); err == nil && entry.Pattern != "" {
 			strs = append(strs, entry.Pattern)
+			entries = append(entries, PatternEntry{
+				ID:       entry.ID,
+				Category: entry.Category,
+				Pattern:  entry.Pattern,
+			})
 			continue
 		}
 		// Fall back to plain string
 		var s string
 		if err := json.Unmarshal(p, &s); err == nil && s != "" {
 			strs = append(strs, s)
+			entries = append(entries, PatternEntry{Pattern: s})
 			continue
 		}
 		log.Printf("config: warning: skipping unparseable pattern at index %d in %s", i, path)
@@ -240,7 +257,7 @@ func LoadPatterns(policyDir string) (*Patterns, error) {
 		log.Printf("config: warning: no usable jailbreak patterns loaded from %s; lexical matching disabled", path)
 	}
 
-	return &Patterns{Version: raw.Version, Patterns: strs}, nil
+	return &Patterns{Version: raw.Version, Patterns: strs, Entries: entries}, nil
 }
 
 // DefaultConfigPath returns the standard config path for the project that

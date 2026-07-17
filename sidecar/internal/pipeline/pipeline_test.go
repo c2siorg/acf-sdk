@@ -40,17 +40,17 @@ func testConfig(strictMode bool) *config.Config {
 	}
 }
 
-func buildPipeline(cfg *config.Config, patterns []string) *Pipeline {
+func buildPipeline(cfg *config.Config, entries []config.PatternEntry) *Pipeline {
 	return New(cfg, []Stage{
 		NewValidateStage(),
 		NewNormaliseStage(),
-		NewScanStage(cfg, patterns),
+		NewScanStage(cfg, entries),
 		NewAggregateStage(cfg),
 	})
 }
 
 func TestPipeline_CleanPayloadAllow(t *testing.T) {
-	pl := buildPipeline(testConfig(true), []string{})
+	pl := buildPipeline(testConfig(true), nil)
 	rc := &riskcontext.RiskContext{
 		HookType:   "on_prompt",
 		Provenance: "user",
@@ -64,7 +64,7 @@ func TestPipeline_CleanPayloadAllow(t *testing.T) {
 }
 
 func TestPipeline_JailbreakPatternBlocks(t *testing.T) {
-	pl := buildPipeline(testConfig(true), []string{"ignore all previous instructions"})
+	pl := buildPipeline(testConfig(true), []config.PatternEntry{{Pattern: "ignore all previous instructions", Category: "instruction_override"}})
 	rc := &riskcontext.RiskContext{
 		HookType:   "on_prompt",
 		Provenance: "user",
@@ -78,7 +78,7 @@ func TestPipeline_JailbreakPatternBlocks(t *testing.T) {
 }
 
 func TestPipeline_InvalidSchemaHardBlocksStrict(t *testing.T) {
-	pl := buildPipeline(testConfig(true), []string{})
+	pl := buildPipeline(testConfig(true), nil)
 	rc := &riskcontext.RiskContext{
 		HookType:   "", // invalid
 		Provenance: "user",
@@ -94,7 +94,7 @@ func TestPipeline_InvalidSchemaHardBlocksStrict(t *testing.T) {
 }
 
 func TestPipeline_NonStrictRunsAllStages(t *testing.T) {
-	pl := buildPipeline(testConfig(false), []string{"ignore all"})
+	pl := buildPipeline(testConfig(false), []config.PatternEntry{{Pattern: "ignore all", Category: "jailbreak_pattern"}})
 	rc := &riskcontext.RiskContext{
 		HookType:   "on_prompt",
 		Provenance: "user",
@@ -112,7 +112,7 @@ func TestPipeline_NonStrictRunsAllStages(t *testing.T) {
 }
 
 func TestPipeline_NonStrictCollectsAllSignals(t *testing.T) {
-	pl := buildPipeline(testConfig(false), []string{"ignore all"})
+	pl := buildPipeline(testConfig(false), []config.PatternEntry{{Pattern: "ignore all", Category: "jailbreak_pattern"}})
 	// Nil payload would block at validate, but non-strict keeps running
 	// and scan + aggregate also run, so score gets computed.
 	rc := &riskcontext.RiskContext{
@@ -148,7 +148,7 @@ func TestPipeline_MidBandSanitise(t *testing.T) {
 
 func TestPipeline_NilEvaluatorFallsBackToThreshold(t *testing.T) {
 	// New() sets evaluator=nil — threshold logic governs.
-	pl := buildPipeline(testConfig(true), []string{})
+	pl := buildPipeline(testConfig(true), nil)
 	rc := &riskcontext.RiskContext{
 		HookType:   "on_prompt",
 		Provenance: "user",
@@ -165,7 +165,7 @@ func TestPipeline_MockEvaluatorOPAOverridesLowScore(t *testing.T) {
 	pl := NewWithEvaluator(cfg, []Stage{
 		NewValidateStage(),
 		NewNormaliseStage(),
-		NewScanStage(cfg, []string{}),
+		NewScanStage(cfg, nil),
 		NewAggregateStage(cfg),
 	}, &mockEvaluator{decision: "BLOCK"})
 
@@ -186,7 +186,7 @@ func TestPipeline_MockEvaluatorSANITISE_PayloadPopulated(t *testing.T) {
 	pl := NewWithEvaluator(cfg, []Stage{
 		NewValidateStage(),
 		NewNormaliseStage(),
-		NewScanStage(cfg, []string{}),
+		NewScanStage(cfg, nil),
 		NewAggregateStage(cfg),
 	}, &mockEvaluator{decision: "SANITISE", targets: []string{"prompt_text"}})
 
@@ -210,7 +210,7 @@ func TestPipeline_OPAErrorFallsBackToThreshold(t *testing.T) {
 	pl := NewWithEvaluator(cfg, []Stage{
 		NewValidateStage(),
 		NewNormaliseStage(),
-		NewScanStage(cfg, []string{}),
+		NewScanStage(cfg, nil),
 		NewAggregateStage(cfg),
 	}, &mockEvaluator{err: errors.New("opa unavailable")})
 
@@ -233,7 +233,7 @@ func TestPipeline_ProvenanceWeightApplied(t *testing.T) {
 		"rag":  0.5, // halved
 	}
 	cfg.SignalWeights["jailbreak_pattern"] = 0.9
-	pl := buildPipeline(cfg, []string{"ignore all"})
+	pl := buildPipeline(cfg, []config.PatternEntry{{Pattern: "ignore all", Category: "jailbreak_pattern"}})
 
 	// Same payload, different provenance — rag should score lower.
 	rcUser := &riskcontext.RiskContext{HookType: "on_prompt", Provenance: "user", Payload: "ignore all previous"}

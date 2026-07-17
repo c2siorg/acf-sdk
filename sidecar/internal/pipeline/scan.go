@@ -11,6 +11,7 @@
 package pipeline
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/cloudflare/ahocorasick"
@@ -27,23 +28,43 @@ var pathTraversalPatterns = []string{"../", "..\\", "/..", "\\.."}
 
 // ScanStage runs lexical pattern matching and allowlist checks.
 type ScanStage struct {
-	cfg      *config.Config
-	matcher  *ahocorasick.Matcher
-	patterns []string // parallel to matcher dictionary
+	cfg     *config.Config
+	matcher *ahocorasick.Matcher
+	cats    [][]string // parallel to matcher dictionary: categories per normalised pattern
 }
 
-// NewScanStage constructs a ScanStage. patterns is the list of strings loaded
-// from jailbreak_patterns.json. An empty pattern list means lexical scan is a
+// NewScanStage constructs a ScanStage. entries is the structured pattern list
+// loaded from jailbreak_patterns.json. An empty list means lexical scan is a
 // no-op (no signals emitted from pattern matching).
-func NewScanStage(cfg *config.Config, patterns []string) *ScanStage {
-	s := &ScanStage{cfg: cfg, patterns: patterns}
-	if len(patterns) > 0 {
-		dict := make([][]byte, len(patterns))
-		for i, p := range patterns {
-			dict[i] = []byte(strings.ToLower(normalisePattern(p)))
-		}
-		s.matcher = ahocorasick.NewMatcher(dict)
+// Distinct patterns can normalise to the same string (e.g. a zero-width-space
+// variant of a plain pattern), which collapses to one node in the AC trie, so
+// the dictionary is deduplicated by normalised form and each slot carries the
+// categories of every entry that mapped to it.
+func NewScanStage(cfg *config.Config, entries []config.PatternEntry) *ScanStage {
+	s := &ScanStage{cfg: cfg}
+	if len(entries) == 0 {
+		return s
 	}
+	index := make(map[string]int)
+	var dict [][]byte
+	for _, e := range entries {
+		norm := strings.ToLower(normalisePattern(e.Pattern))
+		i, ok := index[norm]
+		if !ok {
+			i = len(dict)
+			index[norm] = i
+			dict = append(dict, []byte(norm))
+			s.cats = append(s.cats, nil)
+		}
+		cat := e.Category
+		if cat == "" {
+			cat = "jailbreak_pattern"
+		}
+		if !slices.Contains(s.cats[i], cat) {
+			s.cats[i] = append(s.cats[i], cat)
+		}
+	}
+	s.matcher = ahocorasick.NewMatcher(dict)
 	return s
 }
 
@@ -55,11 +76,22 @@ func (s *ScanStage) Name() string { return "scan" }
 func (s *ScanStage) Run(rc *riskcontext.RiskContext) (hardBlock bool) {
 	text := strings.ToLower(rc.CanonicalText)
 
-	// 1. Aho-Corasick lexical scan.
+	// 1. Aho-Corasick lexical scan with per-category signal emission.
 	if s.matcher != nil && len(text) > 0 {
 		hits := s.matcher.Match([]byte(text))
 		if len(hits) > 0 {
-			rc.Signals = append(rc.Signals, riskcontext.Signal{Category: "jailbreak_pattern"})
+			seen := make(map[string]bool)
+			for _, idx := range hits {
+				for _, cat := range s.cats[idx] {
+					if !seen[cat] {
+						seen[cat] = true
+						rc.Signals = append(rc.Signals, riskcontext.Signal{Category: cat})
+					}
+				}
+			}
+			if !seen["jailbreak_pattern"] {
+				rc.Signals = append(rc.Signals, riskcontext.Signal{Category: "jailbreak_pattern"})
+			}
 		}
 	}
 
