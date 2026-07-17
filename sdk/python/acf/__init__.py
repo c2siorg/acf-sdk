@@ -13,6 +13,7 @@ from .firewall import Firewall
 from .models import (
     ChunkResult,
     Decision,
+    FirewallBlocked,
     FirewallConnectionError,
     FirewallError,
     SanitiseResult,
@@ -23,6 +24,7 @@ __all__ = [
     "Decision",
     "SanitiseResult",
     "ChunkResult",
+    "FirewallBlocked",
     "FirewallError",
     "FirewallConnectionError",
 ]
