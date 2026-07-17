@@ -77,7 +77,7 @@ class Firewall:
         socket_path: str | None = None,
         hmac_key: bytes | None = None,
         enable_semantic_scan: bool | None = None,
-        semantic_signal_threshold: float = 0.85,
+        semantic_signal_threshold: float | None = None,
         semantic_backend: str = "tfidf",
     ) -> None:
         resolved_path = (
@@ -139,16 +139,13 @@ class Firewall:
                 default_signal_threshold = 0.85
 
             # User-provided threshold wins over per-backend default.
-            if semantic_signal_threshold != 0.85:
-                self._semantic_signal_threshold = semantic_signal_threshold
-            else:
-                self._semantic_signal_threshold = default_signal_threshold
+            self._semantic_signal_threshold = semantic_signal_threshold if semantic_signal_threshold is not None else default_signal_threshold
 
             self._semantic_scanner = SemanticScanner(config=config, backend=resolved_backend)
             logger.info("acf-sdk: semantic scanner enabled (%s backend, signal threshold %.2f)",
                         resolved_backend, self._semantic_signal_threshold)
         else:
-            self._semantic_signal_threshold = semantic_signal_threshold
+            self._semantic_signal_threshold = semantic_signal_threshold if semantic_signal_threshold is not None else 0.85
     # ── v1 hook call sites ────────────────────────────────────────────────────
 
     def on_prompt(self, text: str) -> Decision | SanitiseResult:
