@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/acf-sdk/sidecar/internal/config"
 	"github.com/acf-sdk/sidecar/pkg/riskcontext"
 )
 
@@ -159,7 +160,7 @@ func TestNormalise_HyphenUnderscoreTokenNotDecoded(t *testing.T) {
 // jailbreak pattern in scan, same as the standard-alphabet case.
 func TestNormaliseScan_URLSafeBase64Caught(t *testing.T) {
 	norm := NewNormaliseStage()
-	scan := NewScanStage(defaultCfg(), []string{"ignore previous instructions"})
+	scan := NewScanStage(defaultCfg(), []config.PatternEntry{{Pattern: "ignore previous instructions", Category: "jailbreak_pattern"}})
 	rc := &riskcontext.RiskContext{
 		HookType: "on_prompt",
 		Payload:  "run this: " + b64URLSafeInstruction + " please",
@@ -179,7 +180,7 @@ func TestNormaliseScan_URLSafeBase64Caught(t *testing.T) {
 // at the matcher and not just in the canonical text.
 func TestNormaliseScan_EmbeddedBase64Caught(t *testing.T) {
 	norm := NewNormaliseStage()
-	scan := NewScanStage(defaultCfg(), []string{"ignore previous instructions"})
+	scan := NewScanStage(defaultCfg(), []config.PatternEntry{{Pattern: "ignore previous instructions", Category: "jailbreak_pattern"}})
 	rc := &riskcontext.RiskContext{
 		HookType: "on_prompt",
 		Payload:  "please run this " + b64Instruction + " thanks",

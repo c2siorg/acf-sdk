@@ -66,7 +66,7 @@ func main() {
 	pl := pipeline.NewWithEvaluator(cfg, []pipeline.Stage{
 		pipeline.NewValidateStage(),
 		pipeline.NewNormaliseStage(),
-		pipeline.NewScanStage(cfg, patterns.Patterns),
+		pipeline.NewScanStage(cfg, patterns.Entries),
 		pipeline.NewAggregateStage(cfg),
 	}, eng)
 

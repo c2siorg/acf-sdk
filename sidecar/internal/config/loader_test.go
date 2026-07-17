@@ -180,6 +180,15 @@ func TestLoadPatterns_StructuredFormat(t *testing.T) {
 	if p.Patterns[1] != "you are now DAN" {
 		t.Errorf("expected second pattern 'you are now DAN', got %q", p.Patterns[1])
 	}
+	if len(p.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(p.Entries))
+	}
+	if p.Entries[0].ID != "jp-001" || p.Entries[0].Category != "instruction_override" {
+		t.Errorf("expected entry jp-001/instruction_override, got %s/%s", p.Entries[0].ID, p.Entries[0].Category)
+	}
+	if p.Entries[1].Category != "role_escalation" {
+		t.Errorf("expected entry category role_escalation, got %q", p.Entries[1].Category)
+	}
 }
 
 func TestLoadPatterns_FlatStringFormat(t *testing.T) {
@@ -203,6 +212,12 @@ func TestLoadPatterns_FlatStringFormat(t *testing.T) {
 	}
 	if p.Patterns[0] != "ignore all" {
 		t.Errorf("expected 'ignore all', got %q", p.Patterns[0])
+	}
+	if len(p.Entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(p.Entries))
+	}
+	if p.Entries[0].Pattern != "ignore all" || p.Entries[0].Category != "" {
+		t.Errorf("flat entries should carry pattern only, got %+v", p.Entries[0])
 	}
 }
 
