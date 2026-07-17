@@ -165,6 +165,14 @@ For `on_tool_call` and `on_context`, the payload is a map. All string values are
 
 ---
 
+## SDK-side semantic scan (optional pre-stage)
+
+Before a payload reaches the sidecar, the Python SDK can optionally run a **semantic scanner** that compares the text against 49 known attack patterns using embedding similarity. High-confidence hits are pre-populated in `RiskContext.signals` and travel over the wire alongside the sidecar's own signals.
+
+This layer is disabled by default (`enable_semantic_scan=False`) and requires `pip install acf-sdk[scanners]`. See [docs/semantic-scanner.md](semantic-scanner.md) for the full implementation reference, backend comparison, threshold calibration, and detection rate measurements.
+
+---
+
 ## Stage 3 — Scan
 
 **Purpose:** Detect known threat patterns and policy violations; emit named signals.
