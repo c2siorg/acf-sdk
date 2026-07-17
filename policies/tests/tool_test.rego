@@ -140,6 +140,39 @@ test_threshold_medium_sanitise if {
 	result == "SANITISE"
 }
 
+# --- Permission: destination gate with configured allowlist ---
+
+# An allowed tool calling an unlisted destination is blocked when the
+# allowlist is present. This is the production-config scenario: the sidecar
+# loads policy_config.yaml as data.config (engine.go:229). Before this fix,
+# the key was absent from policy_config.yaml so the gate was permanently open.
+test_destination_gate_blocks_unlisted if {
+	result := tool.decision with input as {
+		"tool_name": "http_request",
+		"score": 0.1,
+		"signals": [],
+		"provenance": "agent", "session_id": "t-013", "hook_type": "on_tool_call",
+		"tool_metadata": {"destination": "evil.exfil.example"},
+	}
+		with data.config.tool_allowlist as ["http_request"]
+		with data.config.destination_allowlist as ["api.example.com", "cdn.example.com"]
+	result == "BLOCK"
+}
+
+# A tool call with no destination field passes regardless of allowlist config.
+test_no_destination_field_passes if {
+	result := tool.decision with input as {
+		"tool_name": "calculator",
+		"score": 0.1,
+		"signals": [],
+		"provenance": "agent", "session_id": "t-014", "hook_type": "on_tool_call",
+		"tool_metadata": {},
+	}
+		with data.config.tool_allowlist as ["calculator"]
+		with data.config.destination_allowlist as ["api.example.com"]
+	result == "ALLOW"
+}
+
 # --- False-positive / boundary guards ---
 
 # A detection signal below the 0.5 confidence cut is not treated as a hit.

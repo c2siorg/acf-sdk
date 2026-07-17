@@ -20,6 +20,10 @@ tool_allowlist:          # tools permitted by allowlist gate; empty = block all;
 
 memory_key_allowlist: [] # permitted memory keys; empty = allow all
 
+destination_allowlist:    # permitted network destinations for tool calls; omit key = allow all
+  - api.example.com
+  - cdn.example.com
+
 signal_weights:          # per-signal contribution to risk score
   jailbreak_pattern: 0.9
   instruction_override: 0.85
