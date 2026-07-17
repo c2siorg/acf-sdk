@@ -77,7 +77,7 @@ class Firewall:
         socket_path: str | None = None,
         hmac_key: bytes | None = None,
         enable_semantic_scan: bool | None = None,
-        semantic_signal_threshold: float = 0.85,
+        semantic_signal_threshold: float | None = None,
         semantic_backend: str = "tfidf",
     ) -> None:
         resolved_path = (
@@ -112,10 +112,9 @@ class Firewall:
             enable_semantic_scan = False
 
         self._semantic_scanner = None
-        self._semantic_signal_threshold = semantic_signal_threshold
         if enable_semantic_scan:
             try:
-                from .scanners import SemanticScanner
+                from .scanners import SemanticScanner, SemanticScannerConfig
             except ImportError as exc:
                 raise FirewallError(
                     "Semantic scanning was enabled but the [scanners] extra "
@@ -123,9 +122,30 @@ class Firewall:
                 ) from exc
             env_backend = os.environ.get("ACF_SEMANTIC_SCAN_BACKEND", "").strip().lower()
             resolved_backend = env_backend if env_backend in ("tfidf", "sentence-transformer") else semantic_backend
-            self._semantic_scanner = SemanticScanner(backend=resolved_backend)
-            logger.info("acf-sdk: semantic scanner enabled (%s backend)", resolved_backend)
 
+            # Per-backend defaults. Sentence-transformer produces lower but
+            # cleaner similarity scores than TF-IDF (attack ~0.6, benign ~0.15
+            # vs TF-IDF's attack ~0.8, benign ~0.8). Thresholds are calibrated
+            # so each backend catches paraphrases without false-positiving on
+            # benign text.
+            if resolved_backend == "sentence-transformer":
+                config = SemanticScannerConfig(
+                    default_threshold=0.45,
+                    block_threshold=0.75,
+                )
+                default_signal_threshold = 0.50
+            else:
+                config = SemanticScannerConfig()  # default: 0.75 / 0.90
+                default_signal_threshold = 0.85
+
+            # User-provided threshold wins over per-backend default.
+            self._semantic_signal_threshold = semantic_signal_threshold if semantic_signal_threshold is not None else default_signal_threshold
+
+            self._semantic_scanner = SemanticScanner(config=config, backend=resolved_backend)
+            logger.info("acf-sdk: semantic scanner enabled (%s backend, signal threshold %.2f)",
+                        resolved_backend, self._semantic_signal_threshold)
+        else:
+            self._semantic_signal_threshold = semantic_signal_threshold if semantic_signal_threshold is not None else 0.85
     # ── v1 hook call sites ────────────────────────────────────────────────────
 
     def on_prompt(self, text: str) -> Decision | SanitiseResult:
