@@ -74,6 +74,13 @@ func TestNewSigner_EmptyKey(t *testing.T) {
 	}
 }
 
+func TestNewSigner_ShortKey(t *testing.T) {
+	_, err := NewSigner([]byte("short-key"))
+	if err != ErrKeyTooShort {
+		t.Errorf("expected ErrKeyTooShort, got %v", err)
+	}
+}
+
 func TestNewSignerFromEnv_Valid(t *testing.T) {
 	key := make([]byte, 32)
 	for i := range key {
