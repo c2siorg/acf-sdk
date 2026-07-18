@@ -205,7 +205,7 @@ class Firewall:
             "payload":     content,
             "state":       None,
         }
-        return json.dumps(ctx, separators=(",", ":")).encode("utf-8")
+        return json.dumps(ctx, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
     def _run_semantic_scanner(self, hook_type: str, content: Any) -> list[dict]:
         """Run the semantic scanner on string content and return wire-format signals.

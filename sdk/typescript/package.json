@@ -6,13 +6,15 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "test": "node --test tests/"
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "test:e2e": "npm run build && node --test dist/tests/integration.e2e.js",
+    "test:parity": "npm run build && node --test dist/tests/parity.e2e.js"
   },
   "engines": {
     "node": ">=18"
   },
-  "dependencies": {},
   "devDependencies": {
-    "typescript": "^5.4.0"
+    "@types/node": "^25.5.2",
+    "typescript": "^5.9.3"
   }
 }
