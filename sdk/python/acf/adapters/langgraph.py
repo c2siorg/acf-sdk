@@ -5,26 +5,20 @@ Wraps a Firewall in a node you can insert anywhere in a StateGraph. Picks one
 of the four hooks (on_prompt, on_context, on_tool_call, on_memory) and runs
 it on whatever value you point it at in state.
 
-If the firewall says BLOCK, the node raises NodeInterrupt — the graph halts.
-If it says SANITISE, the node writes the cleaned value back to state.
-If it says ALLOW, nothing changes.
+If the firewall says BLOCK, the node raises FirewallBlocked — a real exception
+that propagates out of the graph run so the caller can stop. If it says
+SANITISE, the node writes the cleaned value back to state. If it says ALLOW,
+nothing changes.
 
-langgraph is not a required dependency. Importing this module without it
-raises ImportError with a useful message.
+langgraph itself is not a required dependency. This module imports without it;
+you only need it installed to actually run a graph.
 """
 from __future__ import annotations
 
 from typing import Any, Callable, Literal, Optional
 
-try:
-    from langgraph.errors import NodeInterrupt
-except ImportError as exc:
-    raise ImportError(
-        "FirewallNode requires langgraph. Install with: pip install langgraph"
-    ) from exc
-
 from ..firewall import Firewall
-from ..models import Decision, SanitiseResult, ChunkResult
+from ..models import Decision, SanitiseResult, ChunkResult, FirewallBlocked
 
 
 HookType = Literal["on_prompt", "on_context", "on_tool_call", "on_memory"]
@@ -54,10 +48,10 @@ class FirewallNode:
         input_key:  Where to read the value from in state.
         output_key: Where to write the result back. Defaults to input_key.
         on_block:   Optional callback (state, decision) -> None. Runs right
-                    before NodeInterrupt is raised. Handy for logging.
+                    before FirewallBlocked is raised. Handy for logging.
 
     Raises:
-        NodeInterrupt: On a BLOCK decision.
+        FirewallBlocked: On a BLOCK decision.
     """
 
     def __init__(
@@ -89,12 +83,13 @@ class FirewallNode:
         value = state[self._input_key]
         decision = self._dispatch(value)
 
-        # Blocked — let the caller know if they want, then halt the graph.
+        # Blocked — let the caller log if they want, then stop the run.
         if decision == Decision.BLOCK:
             if self._on_block is not None:
                 self._on_block(state, decision)
-            raise NodeInterrupt(
-                f"FirewallNode blocked input at hook {self._hook}"
+            raise FirewallBlocked(
+                f"FirewallNode blocked input at hook {self._hook}",
+                hook=self._hook,
             )
 
         # Sanitised — swap the cleaned value back into state.
@@ -154,7 +149,7 @@ class FirewallNode:
         kept: list[str] = []
         for r in results:
             if r.decision == Decision.BLOCK:
-                # Blocked chunk — drop it without halting the graph.
+                # Blocked chunk — drop it without stopping the whole run.
                 continue
             if r.decision == Decision.SANITISE and r.sanitised_text is not None:
                 kept.append(r.sanitised_text)
