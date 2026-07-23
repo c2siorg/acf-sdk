@@ -1,0 +1,8 @@
+services:
+  demo:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile
+    environment:
+      ACF_HMAC_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      ACF_SOCKET_PATH: "/tmp/acf.sock"
