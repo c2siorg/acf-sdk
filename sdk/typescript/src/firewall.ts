@@ -63,7 +63,7 @@ export class Firewall {
 
   private buildPayload(
     hookType: string,
-    content: any,
+    content: unknown,
     provenance: string = 'sdk',
     sessionId: string = ''
   ): Buffer {

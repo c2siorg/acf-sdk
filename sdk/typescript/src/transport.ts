@@ -26,10 +26,14 @@ export class Transport {
       try {
         const raw = await this.connectAndSend(frame);
         return decodeResponse(raw);
-      } catch (err: any) {
-        lastErr = err;
+      } catch (err: unknown) {
+        lastErr = err instanceof Error ? err : new Error(String(err));
+        
+        const isNodeError = err && typeof err === 'object' && 'code' in err;
+        const code = isNodeError ? (err as { code: string }).code : null;
+
         // Retry on connection refused or not found
-        if (err.code === 'ECONNREFUSED' || err.code === 'ENOENT') {
+        if (code === 'ECONNREFUSED' || code === 'ENOENT') {
           if (attempt < MAX_ATTEMPTS) {
             await new Promise((resolve) => setTimeout(resolve, delay));
             delay *= 2;
