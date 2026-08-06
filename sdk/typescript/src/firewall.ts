@@ -51,7 +51,7 @@ export class Firewall {
     return results;
   }
 
-  public async onToolCall(name: string, params: any): Promise<Decision | SanitiseResult> {
+  public async onToolCall(name: string, params: Record<string, unknown>): Promise<Decision | SanitiseResult> {
     const payload = this.buildPayload('on_tool_call', { name, params }, 'agent');
     return this.send(payload);
   }

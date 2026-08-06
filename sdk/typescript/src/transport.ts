@@ -35,6 +35,7 @@ export class Transport {
             delay *= 2;
             continue;
           }
+          break;
         }
         // Re-raise any other errors immediately
         throw err;

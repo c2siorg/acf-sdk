@@ -40,12 +40,17 @@ export class FirewallBlocked extends FirewallError {
   }
 }
 
+export interface Signal {
+  category: string;
+  score: number;
+}
+
 export interface RiskContext {
   score: number;
-  signals: any[];
+  signals: Signal[];
   provenance: string;
   session_id: string;
   hook_type: string;
-  payload: any;
-  state: any | null;
+  payload: unknown;
+  state: unknown | null;
 }
