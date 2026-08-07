@@ -8,6 +8,6 @@
     "strict": true,
     "esModuleInterop": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["dist", "tests"]
+  "include": ["src/**/*", "tests/**/*"],
+  "exclude": ["dist"]
 }
