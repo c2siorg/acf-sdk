@@ -11,10 +11,27 @@ services:
       ACF_HMAC_KEY: ""             # set in .env or shell before running
     restart: unless-stopped
 
+  # Opt-in observability stack. Enable with:
+  #   docker compose --profile observability up -d
+  #
+  # The sidecar service is unaffected when the profile is off, so local
+  # development without a collector keeps working with no config change.
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
-    ports:
-      - "4318:4318"                # OTLP HTTP
+    image: otel/opentelemetry-collector-contrib:0.104.0
+    command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./config/otel-collector.yaml:/etc/otelcol/config.yaml:ro
-    profiles: ["observability"]    # opt-in: docker compose --profile observability up
+    ports:
+      - "4318:4318"                # OTLP HTTP (sidecar -> collector)
+    depends_on:
+      - jaeger
+    profiles: ["observability"]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"              # Jaeger UI
+      - "4317:4317"                # OTLP gRPC (collector -> jaeger)
+    profiles: ["observability"]
