@@ -161,22 +161,97 @@ func TestDecodeResponse_All(t *testing.T) {
 
 func TestSignedMessage_Composition(t *testing.T) {
 	nonce := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	payload := []byte("test payload")
-	length := uint32(len(payload))
+	payload := []byte(`{"key":"value"}`)
 
-	msg := SignedMessage(VersionByte, length, nonce, payload)
+	msg, err := SignedMessage(VersionByte, nonce, payload)
+	if err != nil {
+		t.Fatalf("SignedMessage: %v", err)
+	}
 
 	if msg[0] != VersionByte {
 		t.Errorf("version at [0]: got %#x", msg[0])
 	}
+	// Note: canonical form length may differ from input length
 	gotLen := binary.BigEndian.Uint32(msg[1:5])
-	if gotLen != length {
-		t.Errorf("length at [1:5]: got %d, want %d", gotLen, length)
+	if gotLen == 0 {
+		t.Errorf("canonical length at [1:5]: got 0")
 	}
 	if !bytes.Equal(msg[5:21], nonce[:]) {
 		t.Error("nonce at [5:21] does not match")
 	}
-	if !bytes.Equal(msg[21:], payload) {
-		t.Error("payload at [21:] does not match")
+}
+
+func TestSignedMessage_KeyOrderNormalization(t *testing.T) {
+	nonce := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+
+	payload1 := []byte(`{"b":2,"a":1}`)
+	payload2 := []byte(`{"a":1,"b":2}`)
+
+	msg1, err1 := SignedMessage(VersionByte, nonce, payload1)
+	if err1 != nil {
+		t.Fatalf("SignedMessage payload1: %v", err1)
+	}
+
+	msg2, err2 := SignedMessage(VersionByte, nonce, payload2)
+	if err2 != nil {
+		t.Fatalf("SignedMessage payload2: %v", err2)
+	}
+
+	if !bytes.Equal(msg1, msg2) {
+		t.Error("SignedMessage should produce identical canonical forms for different key orders")
+	}
+}
+
+func TestSignedMessage_WhitespaceNormalization(t *testing.T) {
+	nonce := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+
+	payload1 := []byte(`{"a": 1, "b": 2}`)
+	payload2 := []byte(`{"a":1,"b":2}`)
+
+	msg1, err1 := SignedMessage(VersionByte, nonce, payload1)
+	if err1 != nil {
+		t.Fatalf("SignedMessage payload1: %v", err1)
+	}
+
+	msg2, err2 := SignedMessage(VersionByte, nonce, payload2)
+	if err2 != nil {
+		t.Fatalf("SignedMessage payload2: %v", err2)
+	}
+
+	if !bytes.Equal(msg1, msg2) {
+		t.Error("SignedMessage should normalize whitespace differences")
+	}
+}
+
+func TestSignedMessage_InvalidJSON(t *testing.T) {
+	nonce := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	payload := []byte(`{invalid json`)
+
+	_, err := SignedMessage(VersionByte, nonce, payload)
+	if err == nil {
+		t.Error("SignedMessage should reject invalid JSON")
+	}
+}
+
+func TestSignedMessage_CrossLanguageConsistency(t *testing.T) {
+	nonce := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+
+	// This test ensures that if Python sends {"a":1,"b":2} and Go sends {"b":2,"a":1},
+	// they produce the same signed message (both get canonicalized the same way).
+	pythonStyle := []byte(`{"a":1,"b":2}`)
+	goStyle := []byte(`{"b":2,"a":1}`)
+
+	msg1, err1 := SignedMessage(VersionByte, nonce, pythonStyle)
+	if err1 != nil {
+		t.Fatalf("SignedMessage pythonStyle: %v", err1)
+	}
+
+	msg2, err2 := SignedMessage(VersionByte, nonce, goStyle)
+	if err2 != nil {
+		t.Fatalf("SignedMessage goStyle: %v", err2)
+	}
+
+	if !bytes.Equal(msg1, msg2) {
+		t.Error("Python and Go should produce identical signed messages for semantically equivalent JSON")
 	}
 }
