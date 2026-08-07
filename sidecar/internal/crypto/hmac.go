@@ -14,6 +14,9 @@ import (
 // ErrEmptyKey is returned when a zero-length key is provided.
 var ErrEmptyKey = errors.New("crypto: HMAC key must not be empty")
 
+// ErrKeyTooShort is returned when a key is less than 32 bytes.
+var ErrKeyTooShort = errors.New("crypto: HMAC key must be at least 32 bytes")
+
 // ErrMissingEnvKey is returned when ACF_HMAC_KEY is not set.
 var ErrMissingEnvKey = errors.New("crypto: ACF_HMAC_KEY environment variable is not set")
 
@@ -27,6 +30,9 @@ type Signer struct {
 func NewSigner(key []byte) (*Signer, error) {
 	if len(key) == 0 {
 		return nil, ErrEmptyKey
+	}
+	if len(key) < 32 {
+		return nil, ErrKeyTooShort
 	}
 	k := make([]byte, len(key))
 	copy(k, key)
