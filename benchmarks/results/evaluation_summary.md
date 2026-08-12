@@ -6,12 +6,12 @@ These are detector catch rates through live ACF hooks and the Go sidecar. They a
 
 | Dataset | Scanner | Attack detection | Overlap-excluded detection | Benign false positives | SDK signaled | Verdict lift vs OFF | P50 ms | P90 ms | P95 ms | P99 ms |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| InjecAgent base | OFF | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 0/1054 | baseline | 0.0936 | 0.1092 | 0.1169 | 0.1582 |
-| InjecAgent base | TF-IDF ON | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 19/1054 | +0 non-ALLOW, +0 ALLOW | 0.2846 | 0.4289 | 0.6519 | 1.5500 |
-| InjecAgent base | MiniLM ON | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 15/1054 | +0 non-ALLOW, +0 ALLOW | 10.7127 | 21.0719 | 26.4364 | 36.7211 |
-| PINT format smoke test | OFF | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 0/8 | baseline | 0.1603 | 0.2461 | 0.3122 | 0.3651 |
-| PINT format smoke test | TF-IDF ON | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 1/8 | +0 non-ALLOW, +0 ALLOW | 0.3683 | 0.5840 | 0.7491 | 0.8812 |
-| PINT format smoke test | MiniLM ON | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 1/8 | +0 non-ALLOW, +0 ALLOW | 22.8453 | 29.2740 | 32.9238 | 35.8437 |
+| InjecAgent base | OFF | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 0/1054 | baseline | 1.1176 | 2.4797 | 3.4515 | 5.8456 |
+| InjecAgent base | TF-IDF ON | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 19/1054 | +0 non-ALLOW, +0 ALLOW | 4.6853 | 7.9590 | 9.4558 | 12.1904 |
+| InjecAgent base | MiniLM ON | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 15/1054 | +0 non-ALLOW, +0 ALLOW | 73.4042 | 211.3377 | 260.7931 | 504.7795 |
+| PINT format smoke test | OFF | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 0/8 | baseline | 0.9158 | 2.3014 | 2.5196 | 2.6942 |
+| PINT format smoke test | TF-IDF ON | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 1/8 | +0 non-ALLOW, +0 ALLOW | 7.0787 | 12.3188 | 13.2252 | 13.9502 |
+| PINT format smoke test | MiniLM ON | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 1/8 | +0 non-ALLOW, +0 ALLOW | 141.3208 | 162.1212 | 163.9313 | 165.3794 |
 
 ## InjecAgent split results
 
@@ -27,9 +27,11 @@ InjecAgent maps injected tool responses to `on_context` because ACF v1 has no `o
 
 For InjecAgent, TF-IDF emitted SDK signals on 19/1054 cases and MiniLM emitted SDK signals on 15/1054 cases. Across both ON runs, 0 final verdicts changed. The signaled categories with no sidecar weight or direct rule in `context.rego` were `encoding_evasion`, `role_hijack`, `tool_abuse`
 
-For the PINT format sample, TF-IDF emitted SDK signals on 1/8 cases and MiniLM emitted SDK signals on 1/8 cases. Across both ON runs, 0 final verdicts changed
+For the PINT format sample, TF-IDF emitted SDK signals on 1/8 cases and MiniLM emitted SDK signals on 1/8 cases. Across both ON runs, 0 final verdicts changed. The signaled categories with no sidecar weight or direct rule in `prompt.rego` were `tool_abuse`
 
 The public PINT file is a format sample, not the full benchmark. OFF caught 1/2 attacks, and 1 caught attack had an exact pattern overlap. After excluding exact overlaps, it caught 0/1 attacks with 0/6 benign false positives
+
+All latency values are local descriptive measurements. Raw timing files are not committed, so rerun the pinned commands to reproduce them on another machine
 
 PINT latency percentiles are descriptive only because the public sample has 8 cases
 
@@ -41,8 +43,8 @@ PINT latency percentiles are descriptive only because the public sample has 8 ca
 | Python | `3.14.2` |
 | Go | `go version go1.25.6 darwin/arm64` |
 | Concurrency | `1` sequential call per case |
-| Runner commit | `47915f928236600ffebee611ef252ba1a82fde90` |
-| Runner SHA256 | `24d38f9f6cbc549cddca3b4b08f9f8f81b432ac20e886a3670d835f85f0b8af6` |
+| Runner commit | `bf41a12bc17f6c0b78f1dca42b8fdec22a0741e0` |
+| Runner SHA256 | `d3dc229952a203e657782d7637cc82306287121d0e4532a368556254ac050dd9` |
 | Manifest SHA256 | `f20e0712e1e7234286b4d3bae6c4e8e91dd4920dc01b3374faedcd8707722bcb` |
 
 | Scanner | Model | Model snapshot | Package versions |
