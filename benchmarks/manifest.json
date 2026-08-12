@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-08-12T07:40:14+05:30",
+  "acf": {
+    "repository": "https://github.com/c2siorg/ACF-SDK",
+    "commit": "8811fad3a11b934cc5cd429e78176b11f81a196d",
+    "artifacts": [
+      {
+        "path": "policies/v1/data/jailbreak_patterns.json",
+        "sha256": "d80a4cc3d0eda92917306a6396c1f6753150223432d92cf75209dc814f5e8771"
+      },
+      {
+        "path": "policies/v1/data/policy_config.yaml",
+        "sha256": "b5f0fc578f9a9e0092f5a95eab777f1d2d53c0e1a9967b8d43c99e6ffa123f0a"
+      },
+      {
+        "path": "config/sidecar.yaml",
+        "sha256": "8b57c147f7c4932e5b5d4202db2f9b63304833236a7e97cc467c3e6667dc986f"
+      },
+      {
+        "path": "sdk/python/acf/scanners/attack_library.py",
+        "sha256": "f335b49b2aa9f9a30f2545a40a1079d554ad3159d4643bab1aae14b1915ff2cb"
+      },
+      {
+        "path": "sdk/python/acf/firewall.py",
+        "sha256": "861c31d3cfb9db1e0b9970cd91e25a31844631b1271fec34c9fcc412177d99cd"
+      }
+    ],
+    "pattern_provenance": {
+      "lexical": "The 53 lexical entries do not carry source fields, so source-level disjointness cannot be proved from the file",
+      "semantic": "attack_library.py names PINT, Open-Prompt-Injection, HackAPrompt, LLMail-Inject, and manual red-teaming as sources"
+    }
+  },
+  "benchmarks": {
+    "injecagent": {
+      "repository": "https://github.com/uiuc-kang-lab/InjecAgent",
+      "commit": "f19c9f2c79a41046eb13c03c51a24c567a8ffa07",
+      "license": "MIT",
+      "license_path": "LICENCE",
+      "license_url": "https://raw.githubusercontent.com/uiuc-kang-lab/InjecAgent/f19c9f2c79a41046eb13c03c51a24c567a8ffa07/LICENCE",
+      "license_sha256": "b48589499dbb84caa796b00b4ea652b0443e49660282c44d890fd473b8c0674e",
+      "mapping": "Tool Response is replayed through on_context. This is a proxy for injected tool output because ACF v1 has no on_tool_result hook",
+      "label_scope": "All 1054 base cases are attacks. This dataset cannot produce a false-positive rate without separate benign controls",
+      "files": [
+        {
+          "name": "direct_harm_base",
+          "path": "data/test_cases_dh_base.json",
+          "url": "https://raw.githubusercontent.com/uiuc-kang-lab/InjecAgent/f19c9f2c79a41046eb13c03c51a24c567a8ffa07/data/test_cases_dh_base.json",
+          "git_blob": "976ad4e2108a553a3b885951e8eb119aa91f9445",
+          "sha256": "0a8186468d21389af432e8c7b399ae42264d1b93a07b65c7a489468508604305",
+          "cases": 510
+        },
+        {
+          "name": "data_stealing_base",
+          "path": "data/test_cases_ds_base.json",
+          "url": "https://raw.githubusercontent.com/uiuc-kang-lab/InjecAgent/f19c9f2c79a41046eb13c03c51a24c567a8ffa07/data/test_cases_ds_base.json",
+          "git_blob": "16f82d8a34349182eba883871333e569bafc6b93",
+          "sha256": "4daab35c62a3845e8b9400f4dca58b9c9f37e57cd33b2337552557fbb26282e9",
+          "cases": 544
+        }
+      ]
+    },
+    "pint": {
+      "repository": "https://github.com/lakeraai/pint-benchmark",
+      "commit": "0efab3f463eae9c823130d8faffb71b2e7c06e63",
+      "license": "MIT",
+      "license_path": "LICENSE",
+      "license_url": "https://raw.githubusercontent.com/lakeraai/pint-benchmark/0efab3f463eae9c823130d8faffb71b2e7c06e63/LICENSE",
+      "license_sha256": "5968e9fe3dd27f519635cea1e55aaa638434252e0d896f2f856c2ba0c07a9167",
+      "public_scope": "The repository publishes an 8-case format example, not the 4314-input PINT benchmark. Results on it must be labeled PINT format smoke test",
+      "mapping": "The public sample text is replayed through on_prompt",
+      "label_scope": "The sample has attack and benign labels, so detection rate and false-positive rate are reported separately",
+      "sample": {
+        "path": "benchmark/data/example-dataset.yaml",
+        "url": "https://raw.githubusercontent.com/lakeraai/pint-benchmark/0efab3f463eae9c823130d8faffb71b2e7c06e63/benchmark/data/example-dataset.yaml",
+        "git_blob": "9ecaa8f99f98852ced0e6d21a14a246aea475d95",
+        "sha256": "df068b9a4ff72483f493add6be6242c6aa777df756bd61462aa0e13645cffa90",
+        "cases": 8
+      }
+    },
+    "agentdojo": {
+      "repository": "https://github.com/ethz-spylab/agentdojo",
+      "commit": "089ed468cf3ed0322acc66b0211f26d9d90dbf60",
+      "license": "MIT",
+      "license_path": "LICENSE",
+      "license_url": "https://raw.githubusercontent.com/ethz-spylab/agentdojo/089ed468cf3ed0322acc66b0211f26d9d90dbf60/LICENSE",
+      "license_sha256": "4285a071f2d382338e52b4fb0a186d952984a34d43a33d8872e1a1d8cb43401e",
+      "status": "Deferred until the InjecAgent result is stable. Attack strings are implemented in src/agentdojo/attacks rather than a standalone dataset"
+    }
+  },
+  "contamination_method": {
+    "declared_before_results": true,
+    "full_result": "Every mapped benchmark case is included",
+    "overlap_excluded_result": "Exclude a case when a normalized ACF lexical or semantic reference phrase appears verbatim in its attacker instruction or injected tool response",
+    "normalization": "Unicode NFKC, zero-width removal, lowercase, and whitespace collapse",
+    "limitations": [
+      "Exact phrase comparison does not detect paraphrase or undocumented source reuse",
+      "The lexical file has no per-pattern source metadata",
+      "The semantic library names broad sources, so PINT results have known source-level contamination risk even when no exact phrase matches",
+      "Overlap-excluded is not a held-out set"
+    ]
+  }
+}
