@@ -11,7 +11,11 @@ Set up the Python dependencies:
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
-python3 -m pip install -e 'sdk/python[scanners,dev]' PyYAML
+python3 -m pip install -e 'sdk/python[scanners,dev]' \
+  'PyYAML==6.0.3' 'pytest==9.0.2' \
+  'numpy==2.3.5' 'pydantic==2.13.2' 'scikit-learn==1.8.0' \
+  'sentence-transformers==5.3.0' 'torch==2.12.0' \
+  'transformers==5.4.0' 'huggingface-hub==1.8.0'
 ```
 
 Run all 3 InjecAgent modes:

@@ -424,6 +424,14 @@ def test_evaluation_summary_reports_pint_unwired_category() -> None:
                         "policy_direct_rule": False,
                     }
                 }
+            if dataset == "PINT format smoke test" and mode == "minilm":
+                signaled = 1
+                contract = {
+                    "instruction_override": {
+                        "sidecar_weight_configured": True,
+                        "policy_direct_rule": True,
+                    }
+                }
             case = {
                 "id": "case-1",
                 "verdict": "ALLOW",
@@ -498,7 +506,17 @@ def test_evaluation_summary_reports_pint_unwired_category() -> None:
             )
     rendered = run_benchmark.render_evaluation_summary(results)
     assert (
-        "no sidecar weight or direct rule in `prompt.rego` were `tool_abuse`"
+        "TF-IDF: `tool_abuse` had no sidecar weight or direct rule in "
+        "`prompt.rego`"
+        in rendered
+    )
+    assert (
+        "MiniLM: `instruction_override` had a sidecar weight and direct rule "
+        "in `prompt.rego`"
+        in rendered
+    )
+    assert (
+        "the overlap-excluded result is not a held-out set"
         in rendered
     )
 

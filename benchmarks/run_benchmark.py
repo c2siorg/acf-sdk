@@ -832,6 +832,27 @@ def unwired_contract_note(categories: set[str], policy_file: str) -> str:
     )
 
 
+def per_backend_contract_note(
+    label: str, result: dict[str, Any], policy_file: str
+) -> str:
+    clauses: list[str] = []
+    for category, status in result["semantic_signal_contract"].items():
+        has_weight = status["sidecar_weight_configured"]
+        has_rule = status["policy_direct_rule"]
+        if has_weight and has_rule:
+            wiring = "a sidecar weight and direct rule"
+        elif has_weight:
+            wiring = "a sidecar weight but no direct rule"
+        elif has_rule:
+            wiring = "a direct rule but no sidecar weight"
+        else:
+            wiring = "no sidecar weight or direct rule"
+        clauses.append(f"`{category}` had {wiring} in `{policy_file}`")
+    if not clauses:
+        return ""
+    return f"{label}: " + "; ".join(clauses)
+
+
 def render_markdown_summary(output: dict[str, Any]) -> str:
     summary = output["summary"]
     scanner = output["scanner"]
@@ -990,7 +1011,7 @@ def render_evaluation_summary(results: list[dict[str, Any]]) -> str:
     pint = pint_modes["off"]
     pint_semantic_counts: list[str] = []
     pint_verdict_changes = 0
-    pint_missing_contract_categories: set[str] = set()
+    pint_contract_notes: list[str] = []
     for label, mode in (("TF-IDF", "tfidf"), ("MiniLM", "minilm")):
         result = pint_modes[mode]
         summary = result["summary"]["full"]
@@ -1000,17 +1021,16 @@ def render_evaluation_summary(results: list[dict[str, Any]]) -> str:
         )
         changes = verdict_lift(pint["cases"], result["cases"])
         pint_verdict_changes += changes["new_non_allow"] + changes["new_allow"]
-        pint_missing_contract_categories.update(unwired_signal_categories(result))
+        contract_note = per_backend_contract_note(label, result, "prompt.rego")
+        if contract_note:
+            pint_contract_notes.append(contract_note)
     pint_semantic_interpretation = (
         f"For the PINT format sample, {pint_semantic_counts[0]} and "
         f"{pint_semantic_counts[1]}. Across both ON runs, "
         f"{pint_verdict_changes} final verdicts changed"
     )
-    contract_note = unwired_contract_note(
-        pint_missing_contract_categories, "prompt.rego"
-    )
-    if contract_note:
-        pint_semantic_interpretation += f". {contract_note}"
+    if pint_contract_notes:
+        pint_semantic_interpretation += ". " + ". ".join(pint_contract_notes)
     pint_full = pint["summary"]["classification"]["full"]
     pint_excluded = pint["summary"]["classification"]["overlap_excluded"]
     pint_overlap_caught = sum(
@@ -1028,7 +1048,9 @@ def render_evaluation_summary(results: list[dict[str, Any]]) -> str:
         f"overlaps, it caught {pint_excluded['attacks']['caught']}/"
         f"{pint_excluded['attacks']['cases']} attacks with "
         f"{pint_excluded['benign']['false_positives']}/"
-        f"{pint_excluded['benign']['cases']} benign false positives"
+        f"{pint_excluded['benign']['cases']} benign false positives. "
+        "The semantic library names PINT as a source, so the overlap-excluded "
+        "result is not a held-out set"
     )
 
     lines = [
