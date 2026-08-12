@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 
 MODULE_PATH = Path(__file__).with_name("run_benchmark.py")
@@ -141,6 +142,29 @@ def test_verdict_lift_counts_both_directions() -> None:
         "new_non_allow": 1,
         "new_allow": 1,
     }
+
+
+def test_unwired_signal_categories_reports_only_disconnected_signals() -> None:
+    result = {
+        "semantic_signal_contract": {
+            "tool_abuse": {
+                "sidecar_weight_configured": False,
+                "policy_direct_rule": False,
+            },
+            "instruction_override": {
+                "sidecar_weight_configured": True,
+                "policy_direct_rule": True,
+            },
+        }
+    }
+    assert run_benchmark.unwired_signal_categories(result) == {"tool_abuse"}
+    assert run_benchmark.unwired_contract_note(
+        {"tool_abuse", "encoding_evasion"}, "prompt.rego"
+    ) == (
+        "The signaled categories with no sidecar weight or direct rule in "
+        "`prompt.rego` were `encoding_evasion`, `tool_abuse`"
+    )
+    assert run_benchmark.unwired_contract_note(set(), "prompt.rego") == ""
 
 
 def test_publishable_runner_commit_rejects_dirty_results() -> None:
@@ -375,6 +399,110 @@ def test_evaluation_summary_rejects_mixed_scanner_metadata() -> None:
         raise AssertionError("mixed scanner metadata was accepted")
 
 
+def test_evaluation_summary_reports_pint_unwired_category() -> None:
+    results = []
+    for dataset in ("InjecAgent base", "PINT format smoke test"):
+        for mode, backend in (
+            ("off", None),
+            ("tfidf", "tfidf"),
+            ("minilm", "sentence-transformer"),
+        ):
+            scanner = {
+                "enabled": mode != "off",
+                "backend": backend,
+                "model": "none" if mode == "off" else mode,
+                "model_snapshot": None,
+                "packages": {},
+            }
+            contract = {}
+            signaled = 0
+            if dataset == "PINT format smoke test" and mode == "tfidf":
+                signaled = 1
+                contract = {
+                    "tool_abuse": {
+                        "sidecar_weight_configured": False,
+                        "policy_direct_rule": False,
+                    }
+                }
+            case = {
+                "id": "case-1",
+                "verdict": "ALLOW",
+                "is_attack": True,
+                "overlap_reasons": [],
+            }
+            split = {
+                "cases": 1,
+                "caught": 0,
+                "semantic_signaled_cases": signaled,
+            }
+            classification = {
+                "attacks": {
+                    "cases": 1,
+                    "caught": 0,
+                    "detection_rate": 0.0,
+                },
+                "benign": {
+                    "cases": 0,
+                    "false_positives": 0,
+                    "false_positive_rate": None,
+                },
+            }
+            results.append(
+                {
+                    "dataset": dataset,
+                    "acf_commit": "8811fad",
+                    "runner_commit": "abc123",
+                    "environment": {
+                        "platform": "test",
+                        "python": "3.14",
+                        "go": "go1.25",
+                        "concurrency": 1,
+                    },
+                    "runner": {
+                        "artifacts": [
+                            {
+                                "path": "benchmarks/run_benchmark.py",
+                                "sha256": "runner",
+                            },
+                            {
+                                "path": "benchmarks/manifest.json",
+                                "sha256": "manifest",
+                            },
+                        ]
+                    },
+                    "scanner": scanner,
+                    "cases": [case],
+                    "semantic_signal_contract": contract,
+                    "outcome_sha256": f"{dataset}-{mode}",
+                    "summary": {
+                        "full": {
+                            "cases": 1,
+                            "semantic_signaled_cases": signaled,
+                            "latency_ms": {
+                                "p50": 1.0,
+                                "p90": 1.0,
+                                "p95": 1.0,
+                                "p99": 1.0,
+                            },
+                        },
+                        "classification": {
+                            "full": classification,
+                            "overlap_excluded": classification,
+                        },
+                        "by_split": {
+                            "direct_harm_base": split,
+                            "data_stealing_base": split,
+                        },
+                    },
+                }
+            )
+    rendered = run_benchmark.render_evaluation_summary(results)
+    assert (
+        "no sidecar weight or direct rule in `prompt.rego` were `tool_abuse`"
+        in rendered
+    )
+
+
 def test_default_output_keeps_partial_runs_separate() -> None:
     full = run_benchmark.default_output(
         "injecagent", "off", "tfidf", "8811fad"
@@ -453,7 +581,7 @@ def test_custom_output_paths_remain_available(
     )
 
 
-def test_verify_benchmark_licenses_checks_every_hash(
+def test_verify_benchmark_license_checks_only_selected_benchmark(
     tmp_path: Path, monkeypatch
 ) -> None:
     fetched = []
@@ -468,10 +596,15 @@ def test_verify_benchmark_licenses_checks_every_hash(
                 "license_path": "LICENSE",
                 "license_url": "https://example.com/LICENSE",
                 "license_sha256": "abc123",
-            }
+            },
+            "deferred": {
+                "license_path": "COPYING",
+                "license_url": "https://example.com/COPYING",
+                "license_sha256": "def456",
+            },
         }
     }
-    run_benchmark.verify_benchmark_licenses(manifest, tmp_path)
+    run_benchmark.verify_benchmark_license(manifest, tmp_path, "sample")
     assert fetched == [
         (
             {
@@ -482,6 +615,31 @@ def test_verify_benchmark_licenses_checks_every_hash(
             tmp_path / "licenses",
         )
     ]
+
+
+def test_load_selected_benchmark_uses_only_selected_license(
+    tmp_path: Path, monkeypatch
+) -> None:
+    licenses = []
+    monkeypatch.setattr(
+        run_benchmark,
+        "verify_benchmark_license",
+        lambda manifest, cache_dir, name: licenses.append(name),
+    )
+    monkeypatch.setattr(
+        run_benchmark,
+        "load_pint_format_cases",
+        lambda manifest, cache_dir: [{"id": "pint"}],
+    )
+    args = SimpleNamespace(
+        benchmark="pint-format", split="all", cache_dir=tmp_path
+    )
+    manifest = {"benchmarks": {"pint": {"commit": "pint-sha"}}}
+    cases, spec, name = run_benchmark.load_selected_benchmark(args, manifest)
+    assert licenses == ["pint"]
+    assert cases == [{"id": "pint"}]
+    assert spec == {"commit": "pint-sha"}
+    assert name == "PINT format smoke test"
 
 
 def test_load_pint_format_cases_maps_labels_and_hook(tmp_path: Path, monkeypatch) -> None:

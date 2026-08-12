@@ -102,18 +102,18 @@ def fetch_pinned_file(spec: dict[str, Any], cache_dir: Path) -> Path:
     return destination
 
 
-def verify_benchmark_licenses(
-    manifest: dict[str, Any], cache_dir: Path
+def verify_benchmark_license(
+    manifest: dict[str, Any], cache_dir: Path, name: str
 ) -> None:
-    for name, benchmark in manifest["benchmarks"].items():
-        fetch_pinned_file(
-            {
-                "path": f"{name}-{Path(benchmark['license_path']).name}",
-                "url": benchmark["license_url"],
-                "sha256": benchmark["license_sha256"],
-            },
-            cache_dir / "licenses",
-        )
+    benchmark = manifest["benchmarks"][name]
+    fetch_pinned_file(
+        {
+            "path": f"{name}-{Path(benchmark['license_path']).name}",
+            "url": benchmark["license_url"],
+            "sha256": benchmark["license_sha256"],
+        },
+        cache_dir / "licenses",
+    )
 
 
 def load_injecagent_cases(
@@ -813,6 +813,25 @@ def verdict_lift(
     }
 
 
+def unwired_signal_categories(result: dict[str, Any]) -> set[str]:
+    return {
+        category
+        for category, status in result["semantic_signal_contract"].items()
+        if not status["sidecar_weight_configured"]
+        and not status["policy_direct_rule"]
+    }
+
+
+def unwired_contract_note(categories: set[str], policy_file: str) -> str:
+    if not categories:
+        return ""
+    names = ", ".join(f"`{category}`" for category in sorted(categories))
+    return (
+        "The signaled categories with no sidecar weight or direct rule in "
+        f"`{policy_file}` were {names}"
+    )
+
+
 def render_markdown_summary(output: dict[str, Any]) -> str:
     summary = output["summary"]
     scanner = output["scanner"]
@@ -955,27 +974,23 @@ def render_evaluation_summary(results: list[dict[str, Any]]) -> str:
         )
         changes = verdict_lift(injecagent["off"]["cases"], result["cases"])
         verdict_changes += changes["new_non_allow"] + changes["new_allow"]
-        for category, status in result["semantic_signal_contract"].items():
-            if not status["sidecar_weight_configured"] and not status["policy_direct_rule"]:
-                missing_contract_categories.add(category)
+        missing_contract_categories.update(unwired_signal_categories(result))
 
     semantic_interpretation = (
         f"For InjecAgent, {semantic_counts[0]} and {semantic_counts[1]}. "
         f"Across both ON runs, {verdict_changes} final verdicts changed"
     )
-    if missing_contract_categories:
-        categories = ", ".join(
-            f"`{category}`" for category in sorted(missing_contract_categories)
-        )
-        semantic_interpretation += (
-            f". The signaled categories with no sidecar weight or direct "
-            f"rule in `context.rego` were {categories}"
-        )
+    contract_note = unwired_contract_note(
+        missing_contract_categories, "context.rego"
+    )
+    if contract_note:
+        semantic_interpretation += f". {contract_note}"
 
     pint_modes = by_dataset["PINT format smoke test"]
     pint = pint_modes["off"]
     pint_semantic_counts: list[str] = []
     pint_verdict_changes = 0
+    pint_missing_contract_categories: set[str] = set()
     for label, mode in (("TF-IDF", "tfidf"), ("MiniLM", "minilm")):
         result = pint_modes[mode]
         summary = result["summary"]["full"]
@@ -985,11 +1000,17 @@ def render_evaluation_summary(results: list[dict[str, Any]]) -> str:
         )
         changes = verdict_lift(pint["cases"], result["cases"])
         pint_verdict_changes += changes["new_non_allow"] + changes["new_allow"]
+        pint_missing_contract_categories.update(unwired_signal_categories(result))
     pint_semantic_interpretation = (
         f"For the PINT format sample, {pint_semantic_counts[0]} and "
         f"{pint_semantic_counts[1]}. Across both ON runs, "
         f"{pint_verdict_changes} final verdicts changed"
     )
+    contract_note = unwired_contract_note(
+        pint_missing_contract_categories, "prompt.rego"
+    )
+    if contract_note:
+        pint_semantic_interpretation += f". {contract_note}"
     pint_full = pint["summary"]["classification"]["full"]
     pint_excluded = pint["summary"]["classification"]["overlap_excluded"]
     pint_overlap_caught = sum(
@@ -1093,6 +1114,8 @@ def render_evaluation_summary(results: list[dict[str, Any]]) -> str:
             pint_semantic_interpretation,
             "",
             pint_interpretation,
+            "",
+            "All latency values are local descriptive measurements. Raw timing files are not committed, so rerun the pinned commands to reproduce them on another machine",
             "",
             f"PINT latency percentiles are descriptive only because the public sample has {pint['summary']['full']['cases']} cases",
             "",
@@ -1228,6 +1251,25 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def load_selected_benchmark(
+    args: argparse.Namespace,
+    manifest: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
+    if args.benchmark == "injecagent":
+        benchmark_name = "injecagent"
+        dataset_name = "InjecAgent base"
+        verify_benchmark_license(manifest, args.cache_dir, benchmark_name)
+        cases = load_injecagent_cases(manifest, args.cache_dir, args.split)
+    else:
+        benchmark_name = "pint"
+        dataset_name = "PINT format smoke test"
+        if args.split != "all":
+            raise ValueError("--split only applies to InjecAgent")
+        verify_benchmark_license(manifest, args.cache_dir, benchmark_name)
+        cases = load_pint_format_cases(manifest, args.cache_dir)
+    return cases, manifest["benchmarks"][benchmark_name], dataset_name
+
+
 def main() -> int:
     args = parse_args()
     manifest = load_manifest()
@@ -1238,18 +1280,9 @@ def main() -> int:
     validate_output_destinations(
         baseline_commit, args.output, args.summary_output
     )
-    verify_benchmark_licenses(manifest, args.cache_dir)
-
-    if args.benchmark == "injecagent":
-        cases = load_injecagent_cases(manifest, args.cache_dir, args.split)
-        benchmark_spec = manifest["benchmarks"]["injecagent"]
-        dataset_name = "InjecAgent base"
-    else:
-        if args.split != "all":
-            raise ValueError("--split only applies to InjecAgent")
-        cases = load_pint_format_cases(manifest, args.cache_dir)
-        benchmark_spec = manifest["benchmarks"]["pint"]
-        dataset_name = "PINT format smoke test"
+    cases, benchmark_spec, dataset_name = load_selected_benchmark(
+        args, manifest
+    )
     if args.limit is not None:
         if args.limit < 1:
             raise ValueError("--limit must be positive")

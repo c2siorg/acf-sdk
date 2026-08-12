@@ -14,22 +14,20 @@ python3 -m venv .venv
 python3 -m pip install -e 'sdk/python[scanners,dev]' PyYAML
 ```
 
-Run the lexical path:
+Run all 3 InjecAgent modes:
 
 ```sh
 python3 benchmarks/run_benchmark.py --scanner off
-```
-
-Run the current TF-IDF semantic path on top of the same sidecar:
-
-```sh
 python3 benchmarks/run_benchmark.py --scanner on --semantic-backend tfidf
+python3 benchmarks/run_benchmark.py --scanner on --semantic-backend sentence-transformer
 ```
 
-Run the public 8-case PINT format smoke test:
+Run all 3 modes on the public 8-case PINT format sample:
 
 ```sh
 python3 benchmarks/run_benchmark.py --benchmark pint-format --scanner off
+python3 benchmarks/run_benchmark.py --benchmark pint-format --scanner on --semantic-backend tfidf
+python3 benchmarks/run_benchmark.py --benchmark pint-format --scanner on --semantic-backend sentence-transformer
 ```
 
 The PINT command needs PyYAML. The public file explicitly says it is only a format example, not the 4314-case PINT benchmark. Its attack detection and benign false-positive rates are reported separately
@@ -39,6 +37,8 @@ Each run first checks a lexical attack, a benign context, and a semantic-only at
 Each JSON result has an outcome hash over case IDs, verdicts, semantic signals, and overlap reasons. Latency is excluded from that hash, so repeated runs can check decision reproducibility. The runner and manifest hashes are recorded too. A compact Markdown summary is written next to each full JSON. Once all 6 OFF, TF-IDF, and MiniLM runs from the current runner exist, `evaluation_summary.md` is updated with the paper table
 
 Latency is measured with 1 sequential hook call per case after the 3 preflight calls. Package versions, platform, Python, and Go versions are recorded in the JSON output
+
+The latency table contains local descriptive measurements. Raw timing files are not committed, so rerun the 6 pinned commands to reproduce them on another machine
 
 For a quick local check:
 
