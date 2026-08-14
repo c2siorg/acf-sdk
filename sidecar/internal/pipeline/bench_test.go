@@ -1,8 +1,11 @@
 package pipeline
 
 import (
+	"context"
 	"io"
 	"testing"
+
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/acf-sdk/sidecar/internal/config"
 	"github.com/acf-sdk/sidecar/internal/telemetry"
@@ -13,7 +16,10 @@ func benchStages(cfg *config.Config) []Stage {
 	return []Stage{
 		NewValidateStage(),
 		NewNormaliseStage(),
-		NewScanStage(cfg, []string{"ignore all previous instructions"}),
+		NewScanStage(cfg, []config.PatternEntry{{
+			Pattern:  "ignore all previous instructions",
+			Category: "instruction_override",
+		}}),
 		NewAggregateStage(cfg),
 	}
 }
@@ -56,8 +62,10 @@ func BenchmarkPipeline_WithTracerAndAudit(b *testing.B) {
 	cfg := testConfig(true)
 	sink := telemetry.NewAsyncSink(io.Discard, 4096)
 	defer sink.Close()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.AlwaysSample()))
+	b.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 	pl := NewWithOptions(cfg, benchStages(cfg), Options{
-		Tracer:        telemetry.NoopTracer(),
+		Tracer:        tp.Tracer("acf-sidecar-benchmark"),
 		AuditSink:     sink,
 		PolicyVersion: "v1",
 	})
