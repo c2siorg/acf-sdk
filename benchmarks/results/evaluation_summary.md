@@ -6,12 +6,12 @@ These are detector catch rates through live ACF hooks and the Go sidecar. They a
 
 | Dataset | Scanner | Attack detection | Overlap-excluded detection | Benign false positives | SDK signaled | Verdict lift vs OFF | P50 ms | P90 ms | P95 ms | P99 ms |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| InjecAgent base | OFF | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 0/1054 | baseline | 0.1622 | 0.1839 | 0.1972 | 0.2707 |
-| InjecAgent base | TF-IDF ON | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 19/1054 | +0 non-ALLOW, +0 ALLOW | 0.4724 | 0.5121 | 0.5239 | 0.6064 |
-| InjecAgent base | MiniLM ON | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 15/1054 | +0 non-ALLOW, +0 ALLOW | 15.8262 | 36.1753 | 42.7587 | 53.7158 |
-| PINT format smoke test | OFF | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 0/8 | baseline | 0.2197 | 0.3554 | 0.4727 | 0.5665 |
-| PINT format smoke test | TF-IDF ON | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 1/8 | +0 non-ALLOW, +0 ALLOW | 0.7213 | 1.1751 | 1.4884 | 1.7391 |
-| PINT format smoke test | MiniLM ON | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 1/8 | +0 non-ALLOW, +0 ALLOW | 34.0044 | 40.1599 | 44.1025 | 47.2565 |
+| InjecAgent base | OFF | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 0/1054 | baseline | 0.1610 | 0.1836 | 0.1944 | 0.2630 |
+| InjecAgent base | TF-IDF ON | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 19/1054 | +0 non-ALLOW, +0 ALLOW | 0.4857 | 0.5405 | 0.5713 | 0.7149 |
+| InjecAgent base | MiniLM ON | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 15/1054 | +0 non-ALLOW, +0 ALLOW | 19.2399 | 43.8596 | 53.7841 | 66.4392 |
+| PINT format smoke test | OFF | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 0/8 | baseline | 0.2137 | 0.3612 | 0.4876 | 0.5887 |
+| PINT format smoke test | TF-IDF ON | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 1/8 | +0 non-ALLOW, +0 ALLOW | 0.9362 | 1.6520 | 1.8858 | 2.0728 |
+| PINT format smoke test | MiniLM ON | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 1/8 | +0 non-ALLOW, +0 ALLOW | 46.6057 | 56.5368 | 58.7736 | 60.5630 |
 
 ## InjecAgent split results
 
@@ -29,14 +29,20 @@ These are detector catch rates through live ACF hooks and the Go sidecar. They a
 
 | Tool call type | P50 ms | P90 ms | P95 ms | P99 ms |
 | --- | ---: | ---: | ---: | ---: |
-| attacker | 0.1265 | 0.1363 | 0.1447 | 0.2275 |
-| legitimate | 0.1379 | 0.1507 | 0.1583 | 0.2659 |
+| attacker | 0.1265 | 0.1359 | 0.1450 | 0.2542 |
+| legitimate | 0.1374 | 0.1508 | 0.1639 | 0.3219 |
 
 This is a model-free authorization replay through `on_tool_call`. The 17 dataset user tools were allowed in both sidecar config layers. Legitimate calls used dataset parameters. Attacker calls used empty parameters because InjecAgent does not provide attacker call parameters
 
 An attack case counts as prevented when at least 1 required attacker tool call returns BLOCK. The global legitimate and attacker tool sets overlap on GitHubGetUserDetails
 
 The 17 attacker calls to `GitHubGetUserDetails` returned ALLOW because that name is also in the legitimate allowlist. Each paired `GmailSendEmail` call returned BLOCK
+
+| Authorization provenance | SHA256 |
+| --- | --- |
+| Outcome | `ee42d56d55a37c9639a9a50f901c87cbaf12f6844640d4c08f52b5d27fff7363` |
+| Sidecar config | `e26fb4d6170f55d635ce2e701ad9bd5ccd7ec8fdb8ecee374ce54c71c32d26db` |
+| Policy config | `ee757976c9b47974d535f8684e4c4330dd99091ee4920d34fc3400c70695c653` |
 
 ## Interpretation
 
@@ -60,8 +66,8 @@ PINT latency percentiles are descriptive only because the public sample has 8 ca
 | Python | `3.14.2` |
 | Go | `go version go1.25.6 darwin/arm64` |
 | Concurrency | `1` sequential call per case |
-| Runner commit | `c94d30c00881802dd5d3e3f6a213d2243ad8e07a` |
-| Runner SHA256 | `37fae7a46cecd2067146574b54725d0dcdb7a0ed94058344c18802b26371cf60` |
+| Runner commit | `91149556eab575c8c0bd31fae7b655cf17153139` |
+| Runner SHA256 | `0c901c5b0ec638646148d1458dc3f35a6453f203d9db0de551533649fcfb984a` |
 | Manifest SHA256 | `f20e0712e1e7234286b4d3bae6c4e8e91dd4920dc01b3374faedcd8707722bcb` |
 
 | Scanner | Model | Model snapshot | Package versions |
