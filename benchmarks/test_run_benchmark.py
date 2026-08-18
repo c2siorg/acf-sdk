@@ -129,6 +129,109 @@ def test_outcome_hash_ignores_latency() -> None:
     assert run_benchmark.outcome_sha256([case]) == first
 
 
+def test_tool_authorization_summary_separates_prevention_and_utility() -> None:
+    cases = [
+        {
+            "id": "case-1",
+            "legitimate_call": {
+                "tool": "Search",
+                "verdict": "ALLOW",
+                "latency_ms": 1.0,
+            },
+            "attacker_calls": [
+                {"tool": "SendEmail", "verdict": "BLOCK", "latency_ms": 2.0}
+            ],
+        },
+        {
+            "id": "case-2",
+            "legitimate_call": {
+                "tool": "Profile",
+                "verdict": "BLOCK",
+                "latency_ms": 3.0,
+            },
+            "attacker_calls": [
+                {"tool": "Profile", "verdict": "ALLOW", "latency_ms": 4.0},
+                {
+                    "tool": "SendEmail",
+                    "verdict": "SANITISE",
+                    "latency_ms": 6.0,
+                },
+            ],
+        },
+    ]
+    summary = run_benchmark.tool_authorization_summary(cases)
+    assert summary["attack_cases_prevented"] == 1
+    assert summary["attack_case_prevention_rate"] == 0.5
+    assert summary["attacker_tool_calls_blocked"] == 1
+    assert summary["attacker_tool_call_block_rate"] == 0.333333
+    assert summary["legitimate_tool_calls_allowed"] == 1
+    assert summary["benign_utility_rate"] == 0.5
+    assert summary["allowlist_overlap"] == ["Profile"]
+    assert summary["latency_ms"]["legitimate_calls"]["p50"] == 2.0
+    assert summary["latency_ms"]["attacker_calls"]["p50"] == 4.0
+
+
+def test_tool_authorization_hash_ignores_latency() -> None:
+    cases = [
+        {
+            "id": "case-1",
+            "legitimate_call": {
+                "tool": "Search",
+                "verdict": "ALLOW",
+                "latency_ms": 1.0,
+            },
+            "attacker_calls": [
+                {"tool": "SendEmail", "verdict": "BLOCK", "latency_ms": 2.0}
+            ],
+        }
+    ]
+    first = run_benchmark.tool_authorization_outcome_sha256(cases)
+    cases[0]["legitimate_call"]["latency_ms"] = 99.0
+    cases[0]["attacker_calls"][0]["latency_ms"] = 99.0
+    assert run_benchmark.tool_authorization_outcome_sha256(cases) == first
+
+
+def test_replace_top_level_yaml_list_replaces_only_selected_key() -> None:
+    source = (
+        "tool_allowlist:  # old\n  - old_tool\n\nmemory_key_allowlist:\n  - keep_me\n"
+    )
+    updated = run_benchmark.replace_top_level_yaml_list(
+        source, "tool_allowlist", ["Search", "ReadEmail"]
+    )
+    assert '  - "Search"' in updated
+    assert '  - "ReadEmail"' in updated
+    assert "old_tool" not in updated
+    assert "  - keep_me" in updated
+
+
+def test_prepare_runtime_config_updates_both_allowlists(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "config").mkdir(parents=True)
+    (repo / "policies/v1/data").mkdir(parents=True)
+    (repo / "config/sidecar.yaml").write_text(
+        "policy_dir: ../policies/v1\ntool_allowlist:\n  - old\n",
+        encoding="utf-8",
+    )
+    (repo / "policies/v1/data/policy_config.yaml").write_text(
+        "tool_allowlist:\n  - old\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(run_benchmark, "REPO_ROOT", repo)
+    config_path, metadata = run_benchmark.prepare_runtime_config(
+        tmp_path / "runtime", ["UserToolB", "UserToolA", "UserToolA"]
+    )
+    assert metadata is not None
+    assert metadata["tool_allowlist"] == ["UserToolA", "UserToolB"]
+    assert metadata["tool_allowlist_count"] == 2
+    assert "old" not in config_path.read_text(encoding="utf-8")
+    policy_path = tmp_path / "runtime/policies/v1/data/policy_config.yaml"
+    assert "old" not in policy_path.read_text(encoding="utf-8")
+    for tool in metadata["tool_allowlist"]:
+        assert tool in config_path.read_text(encoding="utf-8")
+        assert tool in policy_path.read_text(encoding="utf-8")
+
+
 def test_verdict_lift_counts_both_directions() -> None:
     baseline = [
         {"id": "a", "verdict": "ALLOW"},
@@ -658,6 +761,43 @@ def test_load_selected_benchmark_uses_only_selected_license(
     assert cases == [{"id": "pint"}]
     assert spec == {"commit": "pint-sha"}
     assert name == "PINT format smoke test"
+
+
+def test_load_injecagent_cases_keeps_user_tool_and_parameters(
+    tmp_path: Path, monkeypatch
+) -> None:
+    rows = [
+        {
+            "Attack Type": "test",
+            "Attacker Instruction": "send the data",
+            "Attacker Tools": ["SendEmail"],
+            "User Tool": "Search",
+            "Tool Parameters": "{'query': 'laptop'}",
+            "Tool Response": "result",
+        }
+    ]
+    source = tmp_path / "cases.json"
+    source.write_text(json.dumps(rows), encoding="utf-8")
+    monkeypatch.setattr(
+        run_benchmark, "fetch_pinned_file", lambda spec, cache_dir: source
+    )
+    manifest = {
+        "benchmarks": {
+            "injecagent": {
+                "files": [
+                    {
+                        "name": "direct_harm_base",
+                        "path": "cases.json",
+                        "cases": 1,
+                    }
+                ]
+            }
+        }
+    }
+    cases = run_benchmark.load_injecagent_cases(manifest, tmp_path, "all")
+    assert cases[0]["user_tool"] == "Search"
+    assert cases[0]["user_tool_params"] == {"query": "laptop"}
+    assert cases[0]["attacker_tools"] == ["SendEmail"]
 
 
 def test_load_pint_format_cases_maps_labels_and_hook(tmp_path: Path, monkeypatch) -> None:
