@@ -502,7 +502,7 @@ def test_evaluation_summary_rejects_mixed_scanner_metadata() -> None:
         raise AssertionError("mixed scanner metadata was accepted")
 
 
-def test_evaluation_summary_reports_pint_unwired_category() -> None:
+def test_evaluation_summary_reports_contract_and_authorization() -> None:
     results = []
     for dataset in ("InjecAgent base", "PINT format smoke test"):
         for mode, backend in (
@@ -558,55 +558,92 @@ def test_evaluation_summary_reports_pint_unwired_category() -> None:
                     "false_positive_rate": None,
                 },
             }
-            results.append(
-                {
-                    "dataset": dataset,
-                    "acf_commit": "8811fad",
-                    "runner_commit": "abc123",
-                    "environment": {
-                        "platform": "test",
-                        "python": "3.14",
-                        "go": "go1.25",
-                        "concurrency": 1,
+            result = {
+                "dataset": dataset,
+                "acf_commit": "8811fad",
+                "runner_commit": "abc123",
+                "environment": {
+                    "platform": "test",
+                    "python": "3.14",
+                    "go": "go1.25",
+                    "concurrency": 1,
+                },
+                "runner": {
+                    "artifacts": [
+                        {
+                            "path": "benchmarks/run_benchmark.py",
+                            "sha256": "runner",
+                        },
+                        {
+                            "path": "benchmarks/manifest.json",
+                            "sha256": "manifest",
+                        },
+                    ]
+                },
+                "scanner": scanner,
+                "cases": [case],
+                "semantic_signal_contract": contract,
+                "outcome_sha256": f"{dataset}-{mode}",
+                "summary": {
+                    "full": {
+                        "cases": 1,
+                        "semantic_signaled_cases": signaled,
+                        "latency_ms": {
+                            "p50": 1.0,
+                            "p90": 1.0,
+                            "p95": 1.0,
+                            "p99": 1.0,
+                        },
                     },
-                    "runner": {
-                        "artifacts": [
-                            {
-                                "path": "benchmarks/run_benchmark.py",
-                                "sha256": "runner",
-                            },
-                            {
-                                "path": "benchmarks/manifest.json",
-                                "sha256": "manifest",
-                            },
-                        ]
+                    "classification": {
+                        "full": classification,
+                        "overlap_excluded": classification,
                     },
-                    "scanner": scanner,
-                    "cases": [case],
-                    "semantic_signal_contract": contract,
-                    "outcome_sha256": f"{dataset}-{mode}",
+                    "by_split": {
+                        "direct_harm_base": split,
+                        "data_stealing_base": split,
+                    },
+                },
+            }
+            if dataset == "InjecAgent base" and mode == "off":
+                result["tool_authorization"] = {
+                    "outcome_sha256": "auth-outcome",
+                    "config": {
+                        "sidecar_config_sha256": "sidecar-config",
+                        "policy_config_sha256": "policy-config",
+                    },
                     "summary": {
                         "full": {
-                            "cases": 1,
-                            "semantic_signaled_cases": signaled,
+                            "attack_cases": 2,
+                            "attack_cases_prevented": 2,
+                            "attack_case_prevention_rate": 1.0,
+                            "attacker_tool_calls": 3,
+                            "attacker_tool_calls_blocked": 2,
+                            "attacker_tool_call_block_rate": 0.666667,
+                            "legitimate_tool_calls": 2,
+                            "legitimate_tool_calls_allowed": 2,
+                            "benign_utility_rate": 1.0,
+                            "distinct_attacker_tools": 2,
+                            "distinct_legitimate_tools": 1,
+                            "allowlist_overlap": ["GitHubGetUserDetails"],
                             "latency_ms": {
-                                "p50": 1.0,
-                                "p90": 1.0,
-                                "p95": 1.0,
-                                "p99": 1.0,
+                                "attacker_calls": {
+                                    "p50": 1.0,
+                                    "p90": 2.0,
+                                    "p95": 3.0,
+                                    "p99": 4.0,
+                                },
+                                "legitimate_calls": {
+                                    "p50": 1.5,
+                                    "p90": 2.5,
+                                    "p95": 3.5,
+                                    "p99": 4.5,
+                                },
                             },
-                        },
-                        "classification": {
-                            "full": classification,
-                            "overlap_excluded": classification,
-                        },
-                        "by_split": {
-                            "direct_harm_base": split,
-                            "data_stealing_base": split,
-                        },
+                        }
                     },
                 }
-            )
+            results.append(result)
     rendered = run_benchmark.render_evaluation_summary(results)
     assert (
         "TF-IDF: `tool_abuse` had no sidecar weight or direct rule in "
@@ -622,6 +659,15 @@ def test_evaluation_summary_reports_pint_unwired_category() -> None:
         "the overlap-excluded result is not a held-out set"
         in rendered
     )
+    assert (
+        "| 2/2 (100.00%) | 2/3 (66.67%) | 2/2 (100.00%) | 2 | 1 |"
+        in rendered
+    )
+    assert "overlap on GitHubGetUserDetails" in rendered
+    assert "Each paired `GmailSendEmail` call returned BLOCK" in rendered
+    assert "| Outcome | `auth-outcome` |" in rendered
+    assert "| Sidecar config | `sidecar-config` |" in rendered
+    assert "| Policy config | `policy-config` |" in rendered
 
 
 def test_default_output_keeps_partial_runs_separate() -> None:

@@ -1459,6 +1459,18 @@ def render_evaluation_summary(results: list[dict[str, Any]]) -> str:
                     "`GitHubGetUserDetails` returned ALLOW because that name is also in the "
                     "legitimate allowlist. Each paired `GmailSendEmail` call returned BLOCK"
                 ),
+                "",
+                "| Authorization provenance | SHA256 |",
+                "| --- | --- |",
+                f"| Outcome | `{authorization['outcome_sha256']}` |",
+                (
+                    "| Sidecar config | "
+                    f"`{authorization['config']['sidecar_config_sha256']}` |"
+                ),
+                (
+                    "| Policy config | "
+                    f"`{authorization['config']['policy_config_sha256']}` |"
+                ),
             ]
         )
 
