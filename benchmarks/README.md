@@ -6,6 +6,8 @@ InjecAgent tool responses map to `on_context`. ACF v1 has no `on_tool_result` ho
 
 The InjecAgent scanner-OFF run also replays tool authorization through `on_tool_call`. It creates a temporary evaluation config with the dataset's 17 legitimate user tools in both allowlists. Each legitimate call uses the dataset parameters. Each attacker tool is called with empty parameters because InjecAgent does not provide structured attacker call parameters. The report keeps text detection, attacker-call blocking, attack-case prevention, and legitimate-call utility separate
 
+The runner builds the allowlist from the sorted unique `User Tool` values in the selected InjecAgent rows. The same dataset supplies the test cases and the allowed tool names. The 100% legitimate-tool result is expected at the name check, though parameter scans and policy rules can still block a call. This can look better than a deployment with an independently chosen allowlist. It does not test allowlist selection or a new legitimate tool. The generated report records all tool names used in the allowlist
+
 The datasets and licenses are fetched at the commits and hashes in `manifest.json`. They are cached outside the repo and are not vendored here
 
 Set up the Python dependencies:

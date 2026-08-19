@@ -1012,6 +1012,19 @@ def format_fraction(numerator: int, denominator: int, rate: float | None) -> str
     return f"{numerator}/{denominator} ({format_rate(rate)})"
 
 
+def authorization_allowlist_note(config: dict[str, Any]) -> str:
+    tools = ", ".join(f"`{tool}`" for tool in config["tool_allowlist"])
+    return (
+        "The runner builds the allowlist from the sorted unique `User Tool` values "
+        f"in the selected InjecAgent rows: {tools}. The same dataset supplies the "
+        "test cases and the allowed tool names. The 100% legitimate-tool result is "
+        "expected at the name check, though parameter scans and policy rules can "
+        "still block a call. This can look better than a deployment with an "
+        "independently chosen allowlist. It does not test allowlist selection or "
+        "a new legitimate tool"
+    )
+
+
 def verdict_lift(
     baseline_cases: list[dict[str, Any]], candidate_cases: list[dict[str, Any]]
 ) -> dict[str, int]:
@@ -1193,6 +1206,8 @@ def render_markdown_summary(output: dict[str, Any]) -> str:
             [
                 "",
                 f"Allowlist: {authorization['config']['tool_allowlist_count']} legitimate tools",
+                "",
+                authorization_allowlist_note(authorization["config"]),
                 "",
                 f"Allowlist overlap: {', '.join(authorization['summary']['full']['allowlist_overlap']) or 'none'}",
                 "",
@@ -1447,6 +1462,8 @@ def render_evaluation_summary(results: list[dict[str, Any]]) -> str:
                     "Legitimate calls used dataset parameters. Attacker calls used empty "
                     "parameters because InjecAgent does not provide attacker call parameters"
                 ),
+                "",
+                authorization_allowlist_note(authorization["config"]),
                 "",
                 (
                     "An attack case counts as prevented when at least 1 required attacker "

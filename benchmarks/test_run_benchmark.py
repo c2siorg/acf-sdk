@@ -232,6 +232,16 @@ def test_prepare_runtime_config_updates_both_allowlists(
         assert tool in policy_path.read_text(encoding="utf-8")
 
 
+def test_authorization_allowlist_note_declares_dataset_bias() -> None:
+    note = run_benchmark.authorization_allowlist_note(
+        {"tool_allowlist": ["ReadEmail", "Search"]}
+    )
+    assert "`ReadEmail`, `Search`" in note
+    assert "same dataset supplies the test cases and the allowed tool names" in note
+    assert "100% legitimate-tool result is expected at the name check" in note
+    assert "does not test allowlist selection" in note
+
+
 def test_verdict_lift_counts_both_directions() -> None:
     baseline = [
         {"id": "a", "verdict": "ALLOW"},
@@ -609,6 +619,7 @@ def test_evaluation_summary_reports_contract_and_authorization() -> None:
                 result["tool_authorization"] = {
                     "outcome_sha256": "auth-outcome",
                     "config": {
+                        "tool_allowlist": ["GitHubGetUserDetails"],
                         "sidecar_config_sha256": "sidecar-config",
                         "policy_config_sha256": "policy-config",
                     },
@@ -665,6 +676,9 @@ def test_evaluation_summary_reports_contract_and_authorization() -> None:
     )
     assert "overlap on GitHubGetUserDetails" in rendered
     assert "Each paired `GmailSendEmail` call returned BLOCK" in rendered
+    assert "`GitHubGetUserDetails`" in rendered
+    assert "same dataset supplies the test cases and the allowed tool names" in rendered
+    assert "100% legitimate-tool result is expected at the name check" in rendered
     assert "| Outcome | `auth-outcome` |" in rendered
     assert "| Sidecar config | `sidecar-config` |" in rendered
     assert "| Policy config | `policy-config` |" in rendered
