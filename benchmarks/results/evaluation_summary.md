@@ -6,12 +6,12 @@ These are detector catch rates through live ACF hooks and the Go sidecar. They a
 
 | Dataset | Scanner | Attack detection | Overlap-excluded detection | Benign false positives | SDK signaled | Verdict lift vs OFF | P50 ms | P90 ms | P95 ms | P99 ms |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| InjecAgent base | OFF | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 0/1054 | baseline | 0.1610 | 0.1836 | 0.1944 | 0.2630 |
-| InjecAgent base | TF-IDF ON | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 19/1054 | +0 non-ALLOW, +0 ALLOW | 0.4857 | 0.5405 | 0.5713 | 0.7149 |
-| InjecAgent base | MiniLM ON | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 15/1054 | +0 non-ALLOW, +0 ALLOW | 19.2399 | 43.8596 | 53.7841 | 66.4392 |
-| PINT format smoke test | OFF | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 0/8 | baseline | 0.2137 | 0.3612 | 0.4876 | 0.5887 |
-| PINT format smoke test | TF-IDF ON | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 1/8 | +0 non-ALLOW, +0 ALLOW | 0.9362 | 1.6520 | 1.8858 | 2.0728 |
-| PINT format smoke test | MiniLM ON | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 1/8 | +0 non-ALLOW, +0 ALLOW | 46.6057 | 56.5368 | 58.7736 | 60.5630 |
+| InjecAgent base | OFF | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 0/1054 | baseline | 0.1587 | 0.1785 | 0.1870 | 0.2422 |
+| InjecAgent base | TF-IDF ON | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 19/1054 | +0 non-ALLOW, +0 ALLOW | 0.4803 | 0.5202 | 0.5356 | 0.6408 |
+| InjecAgent base | MiniLM ON | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 15/1054 | +0 non-ALLOW, +0 ALLOW | 14.8818 | 31.9159 | 36.1367 | 41.7988 |
+| PINT format smoke test | OFF | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 0/8 | baseline | 0.2276 | 0.3739 | 0.4970 | 0.5956 |
+| PINT format smoke test | TF-IDF ON | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 1/8 | +0 non-ALLOW, +0 ALLOW | 0.5677 | 1.0075 | 1.3819 | 1.6815 |
+| PINT format smoke test | MiniLM ON | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 1/8 | +0 non-ALLOW, +0 ALLOW | 32.7959 | 40.2197 | 45.1566 | 49.1061 |
 
 ## InjecAgent split results
 
@@ -29,10 +29,12 @@ These are detector catch rates through live ACF hooks and the Go sidecar. They a
 
 | Tool call type | P50 ms | P90 ms | P95 ms | P99 ms |
 | --- | ---: | ---: | ---: | ---: |
-| attacker | 0.1265 | 0.1359 | 0.1450 | 0.2542 |
-| legitimate | 0.1374 | 0.1508 | 0.1639 | 0.3219 |
+| attacker | 0.1251 | 0.1346 | 0.1399 | 0.2739 |
+| legitimate | 0.1363 | 0.1466 | 0.1538 | 0.2866 |
 
 This is a model-free authorization replay through `on_tool_call`. The 17 dataset user tools were allowed in both sidecar config layers. Legitimate calls used dataset parameters. Attacker calls used empty parameters because InjecAgent does not provide attacker call parameters
+
+The runner builds the allowlist from the sorted unique `User Tool` values in the selected InjecAgent rows: `AmazonGetProductDetails`, `EvernoteManagerSearchNotes`, `GitHubGetRepositoryDetails`, `GitHubGetUserDetails`, `GitHubSearchRepositories`, `GmailReadEmail`, `GmailSearchEmails`, `GoogleCalendarGetEventsFromSharedCalendar`, `GoogleCalendarReadEvents`, `ShopifyGetProductDetails`, `TeladocViewReviews`, `TodoistSearchTasks`, `TwilioGetReceivedSmsMessages`, `TwitterManagerGetUserProfile`, `TwitterManagerReadTweet`, `TwitterManagerSearchTweets`, `WebBrowserNavigateTo`. The same dataset supplies the test cases and the allowed tool names. The 100% legitimate-tool result is expected at the name check, though parameter scans and policy rules can still block a call. This can look better than a deployment with an independently chosen allowlist. It does not test allowlist selection or a new legitimate tool
 
 An attack case counts as prevented when at least 1 required attacker tool call returns BLOCK. The global legitimate and attacker tool sets overlap on GitHubGetUserDetails
 
@@ -66,8 +68,8 @@ PINT latency percentiles are descriptive only because the public sample has 8 ca
 | Python | `3.14.2` |
 | Go | `go version go1.25.6 darwin/arm64` |
 | Concurrency | `1` sequential call per case |
-| Runner commit | `91149556eab575c8c0bd31fae7b655cf17153139` |
-| Runner SHA256 | `0c901c5b0ec638646148d1458dc3f35a6453f203d9db0de551533649fcfb984a` |
+| Runner commit | `cdad6100a36d36e67412676b03a589e07ad82fa5` |
+| Runner SHA256 | `0eb499991449858c14d9029a361e5bc67dc47f067559e866f0b3016781037e66` |
 | Manifest SHA256 | `f20e0712e1e7234286b4d3bae6c4e8e91dd4920dc01b3374faedcd8707722bcb` |
 
 | Scanner | Model | Model snapshot | Package versions |
