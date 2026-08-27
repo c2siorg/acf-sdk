@@ -901,6 +901,26 @@ def test_preflight_expectations_change_with_scanner() -> None:
     assert on[-1]["expected"] == "SANITISE"
 
 
+def test_semantic_preflight_control_is_not_lexical() -> None:
+    control = run_benchmark.normalize_overlap_text(
+        run_benchmark.SEMANTIC_ONLY_PREFLIGHT_TEXT
+    )
+    patterns = run_benchmark.load_reference_patterns()
+    lexical = [
+        run_benchmark.normalize_overlap_text(pattern["text"])
+        for pattern in patterns
+        if pattern["source"] == "lexical"
+    ]
+    semantic = {
+        run_benchmark.normalize_overlap_text(pattern["text"])
+        for pattern in patterns
+        if pattern["source"] == "semantic"
+    }
+
+    assert not any(pattern in control for pattern in lexical)
+    assert control in semantic
+
+
 def test_signal_contract_reports_missing_weight_and_rule() -> None:
     cases = [
         {
