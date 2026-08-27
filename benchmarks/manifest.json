@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "frozen_at": "2026-08-12T07:40:14+05:30",
+  "frozen_at": "2026-08-27T06:55:45+05:30",
   "acf": {
     "repository": "https://github.com/c2siorg/ACF-SDK",
-    "commit": "8811fad3a11b934cc5cd429e78176b11f81a196d",
+    "commit": "1fa1b402a5378f02883136eebf5e32318e8e623a",
     "artifacts": [
       {
         "path": "policies/v1/data/jailbreak_patterns.json",
-        "sha256": "d80a4cc3d0eda92917306a6396c1f6753150223432d92cf75209dc814f5e8771"
+        "sha256": "a86ca3d9342ec9a37726ab534d33ee19b0ddae4777c0f255761a6900d159e5b5"
       },
       {
         "path": "policies/v1/data/policy_config.yaml",
@@ -27,7 +27,7 @@
       }
     ],
     "pattern_provenance": {
-      "lexical": "The 53 lexical entries do not carry source fields, so source-level disjointness cannot be proved from the file",
+      "lexical": "The 79 lexical entries do not carry source fields, so source-level disjointness cannot be proved from the file",
       "semantic": "attack_library.py names PINT, Open-Prompt-Injection, HackAPrompt, LLMail-Inject, and manual red-teaming as sources"
     }
   },
