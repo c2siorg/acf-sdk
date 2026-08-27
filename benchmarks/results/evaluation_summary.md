@@ -1,17 +1,17 @@
 # External benchmark evaluation
 
-ACF commit: `8811fad3a11b934cc5cd429e78176b11f81a196d`
+ACF commit: `1fa1b402a5378f02883136eebf5e32318e8e623a`
 
 These are detector catch rates through live ACF hooks and the Go sidecar. They are not agent attack success rates
 
 | Dataset | Scanner | Attack detection | Overlap-excluded detection | Benign false positives | SDK signaled | Verdict lift vs OFF | P50 ms | P90 ms | P95 ms | P99 ms |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| InjecAgent base | OFF | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 0/1054 | baseline | 0.1587 | 0.1785 | 0.1870 | 0.2422 |
-| InjecAgent base | TF-IDF ON | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 19/1054 | +0 non-ALLOW, +0 ALLOW | 0.4803 | 0.5202 | 0.5356 | 0.6408 |
-| InjecAgent base | MiniLM ON | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 15/1054 | +0 non-ALLOW, +0 ALLOW | 14.8818 | 31.9159 | 36.1367 | 41.7988 |
-| PINT format smoke test | OFF | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 0/8 | baseline | 0.2276 | 0.3739 | 0.4970 | 0.5956 |
-| PINT format smoke test | TF-IDF ON | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 1/8 | +0 non-ALLOW, +0 ALLOW | 0.5677 | 1.0075 | 1.3819 | 1.6815 |
-| PINT format smoke test | MiniLM ON | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 1/8 | +0 non-ALLOW, +0 ALLOW | 32.7959 | 40.2197 | 45.1566 | 49.1061 |
+| InjecAgent base | OFF | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 0/1054 | baseline | 0.1670 | 0.1946 | 0.2071 | 0.2689 |
+| InjecAgent base | TF-IDF ON | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 19/1054 | +0 non-ALLOW, +0 ALLOW | 0.5112 | 0.6036 | 0.6745 | 0.9786 |
+| InjecAgent base | MiniLM ON | 0/1054 (0.00%) | 0/1054 (0.00%) | n/a | 15/1054 | +0 non-ALLOW, +0 ALLOW | 18.5964 | 45.2322 | 59.8227 | 88.6524 |
+| PINT format smoke test | OFF | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 0/8 | baseline | 0.2347 | 0.3727 | 0.4930 | 0.5893 |
+| PINT format smoke test | TF-IDF ON | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 1/8 | +0 non-ALLOW, +0 ALLOW | 0.7093 | 1.1052 | 1.4445 | 1.7160 |
+| PINT format smoke test | MiniLM ON | 1/2 (50.00%) | 0/1 (0.00%) | 0/6 (0.00%) | 1/8 | +0 non-ALLOW, +0 ALLOW | 45.0153 | 50.2025 | 54.8405 | 58.5509 |
 
 ## InjecAgent split results
 
@@ -29,8 +29,8 @@ These are detector catch rates through live ACF hooks and the Go sidecar. They a
 
 | Tool call type | P50 ms | P90 ms | P95 ms | P99 ms |
 | --- | ---: | ---: | ---: | ---: |
-| attacker | 0.1251 | 0.1346 | 0.1399 | 0.2739 |
-| legitimate | 0.1363 | 0.1466 | 0.1538 | 0.2866 |
+| attacker | 0.1286 | 0.1436 | 0.1516 | 0.2536 |
+| legitimate | 0.1398 | 0.1547 | 0.1678 | 0.2731 |
 
 This is a model-free authorization replay through `on_tool_call`. The 17 dataset user tools were allowed in both sidecar config layers. Legitimate calls used dataset parameters. Attacker calls used empty parameters because InjecAgent does not provide attacker call parameters
 
@@ -68,9 +68,9 @@ PINT latency percentiles are descriptive only because the public sample has 8 ca
 | Python | `3.14.2` |
 | Go | `go version go1.25.6 darwin/arm64` |
 | Concurrency | `1` sequential call per case |
-| Runner commit | `cdad6100a36d36e67412676b03a589e07ad82fa5` |
-| Runner SHA256 | `0eb499991449858c14d9029a361e5bc67dc47f067559e866f0b3016781037e66` |
-| Manifest SHA256 | `f20e0712e1e7234286b4d3bae6c4e8e91dd4920dc01b3374faedcd8707722bcb` |
+| Runner commit | `85954ed6ce0b4cc89a8ee8304eaa1dd2619216f5` |
+| Runner SHA256 | `d37a042071b767e85415ae21dda16e501c67caf2cb71793ae8b042f2b3b6b909` |
+| Manifest SHA256 | `b6df0ccf4d35e54d5afbe7b9005beb3eda93cd0e18d1ef55830e866a0875a616` |
 
 | Scanner | Model | Model snapshot | Package versions |
 | --- | --- | --- | --- |
