@@ -70,6 +70,34 @@ func TestLoadResolvesRelativePolicyDirAgainstConfigFile(t *testing.T) {
 	}
 }
 
+func TestLoadTelemetryConfig(t *testing.T) {
+	root := makeProjectRoot(t)
+	configPath := filepath.Join(root, "config", "sidecar.yaml")
+	raw := `telemetry:
+  otel_endpoint: http://collector:4318
+  service_name: acf-test
+  sample_ratio: 0.25
+  insecure: true
+  audit_path: /tmp/acf-audit.jsonl
+  audit_buffer: 256
+  policy_version: test-v1
+`
+	if err := os.WriteFile(configPath, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := cfg.Telemetry
+	if got.OTelEndpoint != "http://collector:4318" || got.ServiceName != "acf-test" ||
+		got.SampleRatio != 0.25 || !got.Insecure || got.AuditPath != "/tmp/acf-audit.jsonl" ||
+		got.AuditBuffer != 256 || got.PolicyVersion != "test-v1" {
+		t.Fatalf("Telemetry: got %+v", got)
+	}
+}
+
 func TestLoadResolvesRelativePolicyDirViaConfigSymlink(t *testing.T) {
 	root := t.TempDir()
 	realConfigDir := filepath.Join(root, "real-config")

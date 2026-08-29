@@ -1,5 +1,5 @@
 // audit.go — structured audit log formatting.
-// Writes one JSON line per enforcement decision to the configured audit sink.
+// Writes one JSON line per pipeline result or audited transport rejection.
 // Fields: hook_type, decision, score, signals, provenance, session_id, policy_version, trace_id.
 package telemetry
 
@@ -91,13 +91,14 @@ func (s *asyncJSONSink) Emit(e AuditEntry) {
 
 func (s *asyncJSONSink) Close() error {
 	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return s.writeErr
+	if !s.closed {
+		s.closed = true
+		close(s.ch)
 	}
-	s.closed = true
-	close(s.ch)
 	s.mu.Unlock()
+
+	// Every caller waits for the drain goroutine. This keeps concurrent Close
+	// calls from reading writeErr while the final write is still in progress.
 	s.wg.Wait()
 	return s.writeErr
 }

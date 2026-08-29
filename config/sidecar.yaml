@@ -39,7 +39,11 @@ memory_key_allowlist:           # restrict to known-safe memory keys; empty = al
 # signal_weights moved to policies/v1/data/policy_config.yaml, where the policy
 # engine hot-reloads them. A signal_weights table here is ignored (and logged).
 
-otel:
-  enabled: false
-  endpoint: ""                  # e.g. http://localhost:4318/v1/traces (OTLP HTTP)
+telemetry:
+  otel_endpoint: ""             # e.g. collector.example.com:4318
   service_name: acf-sidecar
+  sample_ratio: 1.0
+  insecure: false                # set true for a plaintext HTTP collector
+  audit_path: ""                 # empty or "-" writes JSON lines to stdout
+  audit_buffer: 1024
+  policy_version: v1

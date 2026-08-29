@@ -8,12 +8,14 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net"
 	"sync"
 
 	"github.com/acf-sdk/sidecar/internal/crypto"
 	"github.com/acf-sdk/sidecar/internal/pipeline"
+	"github.com/acf-sdk/sidecar/internal/telemetry"
 	"github.com/acf-sdk/sidecar/pkg/riskcontext"
 )
 
@@ -25,6 +27,9 @@ type Config struct {
 	Connector  Connector
 	Signer     *crypto.Signer
 	NonceStore *crypto.NonceStore
+	AuditSink  telemetry.AuditSink
+	// PolicyVersion is added to transport rejection audit entries.
+	PolicyVersion string
 	// Pipeline is the enforcement pipeline. If nil, a hardcoded ALLOW is returned
 	// (Phase 1 fallback — should not be nil in Phase 2+).
 	Pipeline *pipeline.Pipeline
@@ -57,6 +62,9 @@ func NewListener(cfg Config) (*Listener, error) {
 	ln, err := cfg.Connector.Listen(cfg.Address)
 	if err != nil {
 		return nil, err
+	}
+	if cfg.AuditSink == nil {
+		cfg.AuditSink = telemetry.NopSink{}
 	}
 
 	return &Listener{
@@ -173,6 +181,9 @@ func (l *Listener) handleConn(conn net.Conn) {
 	rf, err := DecodeRequest(conn)
 	if err != nil {
 		log.Printf("transport: decode error: %v", err)
+		if category := decodeRejectCategory(err); category != "" {
+			l.emitTransportBlock(category)
+		}
 		return
 	}
 
@@ -181,12 +192,14 @@ func (l *Listener) handleConn(conn net.Conn) {
 	signedMsg := SignedMessage(rf.Version, length, rf.Nonce, rf.Payload)
 	if !l.cfg.Signer.Verify(signedMsg, rf.HMAC[:]) {
 		log.Printf("transport: %v", ErrBadHMAC)
+		l.emitTransportBlock("transport:hmac_invalid")
 		return
 	}
 
 	// 3. Check nonce replay.
 	if l.cfg.NonceStore.Seen(rf.Nonce[:]) {
 		log.Printf("transport: %v", ErrReplayNonce)
+		l.emitTransportBlock("transport:replay_nonce")
 		return
 	}
 
@@ -196,6 +209,7 @@ func (l *Listener) handleConn(conn net.Conn) {
 		var rc riskcontext.RiskContext
 		if err := json.Unmarshal(rf.Payload, &rc); err != nil {
 			log.Printf("transport: JSON unmarshal error: %v", err)
+			l.emitTransportBlock("transport:invalid_json")
 			resp := EncodeResponse(&ResponseFrame{Decision: DecisionBlock})
 			conn.Write(resp) //nolint:errcheck
 			return
@@ -221,4 +235,24 @@ func (l *Listener) handleConn(conn net.Conn) {
 	if _, err := conn.Write(resp); err != nil {
 		log.Printf("transport: write error: %v", err)
 	}
+}
+
+func decodeRejectCategory(err error) string {
+	switch {
+	case errors.Is(err, ErrBadMagic):
+		return "transport:bad_magic"
+	case errors.Is(err, ErrBadVersion):
+		return "transport:bad_version"
+	default:
+		return ""
+	}
+}
+
+func (l *Listener) emitTransportBlock(category string) {
+	entry := telemetry.NewEntry()
+	entry.Decision = "block"
+	entry.Signals = []string{category}
+	entry.PolicyVersion = l.cfg.PolicyVersion
+	entry.BlockedAt = "transport"
+	l.cfg.AuditSink.Emit(entry)
 }

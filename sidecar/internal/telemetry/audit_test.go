@@ -3,9 +3,12 @@ package telemetry
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestAuditEntry_JSONShape(t *testing.T) {
@@ -221,6 +224,50 @@ func TestAsyncSink_ConcurrentEmitAndClose(t *testing.T) {
 	}
 }
 
+func TestAsyncSink_ConcurrentCloseWaitsForDrain(t *testing.T) {
+	wantErr := errors.New("write failed")
+	w := &gatedErrorWriter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		err:     wantErr,
+	}
+	sink := NewAsyncSink(w, 1).(*asyncJSONSink)
+	sink.Emit(NewEntry())
+	<-w.started
+
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- sink.Close() }()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		sink.mu.RLock()
+		closed := sink.closed
+		sink.mu.RUnlock()
+		if closed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("first Close did not close the sink")
+		}
+		runtime.Gosched()
+	}
+
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- sink.Close() }()
+	select {
+	case err := <-secondDone:
+		t.Fatalf("second Close returned before drain completed: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(w.release)
+	for i, result := range []<-chan error{firstDone, secondDone} {
+		if err := <-result; !errors.Is(err, wantErr) {
+			t.Errorf("Close call %d: got %v, want %v", i+1, err, wantErr)
+		}
+	}
+}
+
 func TestNopSink_Interface(t *testing.T) {
 	var sink AuditSink = NopSink{}
 	sink.Emit(NewEntry())
@@ -262,4 +309,17 @@ type gatedWriter struct {
 func (g *gatedWriter) Write(p []byte) (int, error) {
 	<-g.release
 	return len(p), nil
+}
+
+type gatedErrorWriter struct {
+	started chan struct{}
+	release chan struct{}
+	err     error
+	once    sync.Once
+}
+
+func (g *gatedErrorWriter) Write(p []byte) (int, error) {
+	g.once.Do(func() { close(g.started) })
+	<-g.release
+	return 0, g.err
 }
