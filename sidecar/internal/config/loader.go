@@ -55,7 +55,8 @@ type Config struct {
 // TelemetryConfig controls span emission and audit log output.
 type TelemetryConfig struct {
 	// OTelEndpoint is the OTLP HTTP collector URL. Accepts host:port or a
-	// full URL. Empty disables span emission.
+	// full URL. URL schemes do not override Insecure. Empty disables span
+	// emission.
 	OTelEndpoint string `yaml:"otel_endpoint"`
 
 	// ServiceName is stamped on every span as service.name. Defaults to

@@ -55,7 +55,8 @@ signal_weights:                   # per-signal contribution to risk score (0.0â€
 
 telemetry:
   # Leave otel_endpoint empty to install a noop tracer. Accepts host:port or
-  # a full URL; path components are ignored.
+  # a full URL; path components are ignored. A URL scheme does not change
+  # transport security, so set insecure to true for plaintext HTTP.
   otel_endpoint: ""               # e.g. http://otel-collector:4318
   service_name: acf-sidecar
   sample_ratio: 1.0               # 0.0 disables span emission entirely

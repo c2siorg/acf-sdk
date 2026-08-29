@@ -124,11 +124,13 @@ func main() {
 
 	// 9. Create and start listener.
 	ln, err := transport.NewListener(transport.Config{
-		Address:    address,
-		Connector:  connector,
-		Signer:     signer,
-		NonceStore: nonceStore,
-		Pipeline:   pl,
+		Address:       address,
+		Connector:     connector,
+		Signer:        signer,
+		NonceStore:    nonceStore,
+		Pipeline:      pl,
+		AuditSink:     audit,
+		PolicyVersion: cfg.Telemetry.PolicyVersion,
 	})
 	if err != nil {
 		log.Fatalf("sidecar: failed to create listener on %s: %v", address, err)
@@ -202,11 +204,15 @@ func openAuditWriter(path string) (io.Writer, func() error, error) {
 	if path == "" || path == "-" {
 		return os.Stdout, nil, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, nil, err
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
 		return nil, nil, err
 	}
 	return f, f.Close, nil
