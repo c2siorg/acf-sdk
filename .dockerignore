@@ -1,0 +1,42 @@
+# Build context for demo/Dockerfile is the repo root, so exclude everything
+# the image does not need. Keeps the context small and the build fast.
+#
+# Note: the root docker-compose.yml builds with context ./sidecar, which
+# resolves sidecar/.dockerignore instead — this file only affects the demo.
+
+.git
+.gitignore
+.github
+.archived
+.claude
+.mcp.json
+
+# Build artefacts and local binaries
+**/*.exe
+**/*.dll
+**/*.so
+**/*.dylib
+sidecar/sidecar
+sidecar/sidecar.exe
+
+# Language caches
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/node_modules
+**/dist
+**/build
+**/*.egg-info
+**/.venv
+**/venv
+
+# Not needed at runtime
+docs
+examples
+tests
+scripts
+sdk/typescript
+**/*.md
+!demo/README.md

@@ -4,5 +4,8 @@ services:
       context: ..
       dockerfile: demo/Dockerfile
     environment:
-      ACF_HMAC_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      # Left empty on purpose. The entrypoint mints an ephemeral key per run.
+      # Export ACF_HMAC_KEY (hex, >= 32 bytes) before `docker compose up` to
+      # pin one. Do not commit a real key here.
+      ACF_HMAC_KEY: "${ACF_HMAC_KEY:-}"
       ACF_SOCKET_PATH: "/tmp/acf.sock"
