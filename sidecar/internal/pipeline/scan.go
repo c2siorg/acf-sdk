@@ -122,6 +122,7 @@ func (s *ScanStage) checkToolAllowlist(rc *riskcontext.RiskContext) {
 
 // checkToolDangerousParams scans all string values in the tool params for shell
 // metacharacters and path traversal sequences, emitting signals independently.
+// Checks listed in tool_param_scan_skip for a specific parameter are not run.
 func (s *ScanStage) checkToolDangerousParams(rc *riskcontext.RiskContext) {
 	m, ok := rc.Payload.(map[string]any)
 	if !ok {
@@ -131,23 +132,31 @@ func (s *ScanStage) checkToolDangerousParams(rc *riskcontext.RiskContext) {
 	if !ok {
 		return
 	}
+	toolName, _ := m["name"].(string)
 
-	combined := flattenStrings(params)
-	lower := strings.ToLower(combined)
-
-	for _, seq := range shellMetachars {
-		if strings.Contains(lower, seq) {
-			rc.Signals = append(rc.Signals, riskcontext.Signal{Category: "shell_metacharacter"})
-			break
-		}
+	if s.hasDangerousParam(params, toolName, "shell_metacharacter", shellMetachars) {
+		rc.Signals = append(rc.Signals, riskcontext.Signal{Category: "shell_metacharacter"})
 	}
 
-	for _, seq := range pathTraversalPatterns {
-		if strings.Contains(lower, seq) {
-			rc.Signals = append(rc.Signals, riskcontext.Signal{Category: "path_traversal"})
-			break
+	if s.hasDangerousParam(params, toolName, "path_traversal", pathTraversalPatterns) {
+		rc.Signals = append(rc.Signals, riskcontext.Signal{Category: "path_traversal"})
+	}
+}
+
+func (s *ScanStage) hasDangerousParam(params map[string]any, toolName, check string, patterns []string) bool {
+	for paramName, value := range params {
+		_, isString := value.(string)
+		if isString && s.cfg.ParamScanSkipped(toolName, paramName, check) {
+			continue
+		}
+		lower := strings.ToLower(flattenStrings(map[string]any{paramName: value}))
+		for _, seq := range patterns {
+			if strings.Contains(lower, seq) {
+				return true
+			}
 		}
 	}
+	return false
 }
 
 // flattenStrings recursively collects all string leaf values from a map.

