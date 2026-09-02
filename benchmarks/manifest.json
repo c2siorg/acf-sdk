@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "frozen_at": "2026-09-02T11:17:07+01:00",
+  "frozen_at": "2026-09-02T11:30:58+01:00",
   "acf": {
     "repository": "https://github.com/c2siorg/ACF-SDK",
-    "commit": "ed1d060cd1afeaf238e87ba2d45a3dac1909d218",
+    "commit": "fe4fea6f89b03cde819195304897bb69d5981751",
     "artifacts": [
       {
         "path": "policies/v1/data/jailbreak_patterns.json",
@@ -15,7 +15,7 @@
       },
       {
         "path": "config/sidecar.yaml",
-        "sha256": "8b57c147f7c4932e5b5d4202db2f9b63304833236a7e97cc467c3e6667dc986f"
+        "sha256": "2d257b81b1917c22d9c9680df31b3a42bdedf36c8cd5b16662eacc7d5e2be6ad"
       },
       {
         "path": "sdk/python/acf/scanners/attack_library.py",
