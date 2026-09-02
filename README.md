@@ -7,7 +7,7 @@ A Zero Trust security layer for LLM agents. Enforces policy-driven validation at
 
 > **Status: Phase 3 complete — OPA policy engine running. Phase 4 (OTel observability + integration tests) next.**
 
-**New to ACF-SDK?** Start with the [plain-English overview](docs/overview.md) to understand what the SDK and sidecar do before diving into the details below.
+**New to ACF-SDK?** Start with the [layman overview](docs/overview.md) to understand what the SDK and sidecar do before diving into the details below.
 
 ---
 
