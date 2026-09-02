@@ -1,0 +1,58 @@
+# External benchmark runner
+
+This runner replays public benchmark payloads through the Python ACF hook and a live Go sidecar. It does not run an agent model, so the reported number is detector catch rate, not agent attack success rate
+
+InjecAgent tool responses map to `on_context`. ACF v1 has no `on_tool_result` hook, so the result is labeled as a proxy. `SANITISE` and `BLOCK` both count as caught because both stop the original injected response from reaching the model unchanged
+
+The InjecAgent scanner-OFF run also replays tool authorization through `on_tool_call`. It creates a temporary evaluation config with the dataset's 17 legitimate user tools in both allowlists. Each legitimate call uses the dataset parameters. Each attacker tool is called with empty parameters because InjecAgent does not provide structured attacker call parameters. The report keeps text detection, attacker-call blocking, attack-case prevention, and legitimate-call utility separate
+
+The runner builds the allowlist from the sorted unique `User Tool` values in the selected InjecAgent rows. The same dataset supplies the test cases and the allowed tool names. The 100% legitimate-tool result is expected at the name check, though parameter scans and policy rules can still block a call. This can look better than a deployment with an independently chosen allowlist. It does not test allowlist selection or a new legitimate tool. The generated report records all tool names used in the allowlist
+
+The datasets and licenses are fetched at the commits and hashes in `manifest.json`. They are cached outside the repo and are not vendored here
+
+Set up the Python dependencies:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -e 'sdk/python[scanners,dev]' \
+  'PyYAML==6.0.3' 'pytest==9.0.2' \
+  'numpy==2.3.5' 'pydantic==2.13.2' 'scikit-learn==1.8.0' \
+  'sentence-transformers==5.3.0' 'torch==2.12.0' \
+  'transformers==5.4.0' 'huggingface-hub==1.8.0'
+```
+
+Run all 3 InjecAgent modes:
+
+```sh
+python3 benchmarks/run_benchmark.py --scanner off
+python3 benchmarks/run_benchmark.py --scanner on --semantic-backend tfidf
+python3 benchmarks/run_benchmark.py --scanner on --semantic-backend sentence-transformer
+```
+
+Run all 3 modes on the public 8-case PINT format sample:
+
+```sh
+python3 benchmarks/run_benchmark.py --benchmark pint-format --scanner off
+python3 benchmarks/run_benchmark.py --benchmark pint-format --scanner on --semantic-backend tfidf
+python3 benchmarks/run_benchmark.py --benchmark pint-format --scanner on --semantic-backend sentence-transformer
+```
+
+The PINT command needs PyYAML. The public file explicitly says it is only a format example, not the 4314-case PINT benchmark. Its attack detection and benign false-positive rates are reported separately
+
+Each run first checks a lexical attack, a benign context, and a semantic-only attack against the same live process. These 3 warmup calls are excluded from latency. The InjecAgent scanner-OFF run adds 2 authorization controls, 1 allowed and 1 blocked. The result file has those controls plus a per-case verdict, latency, SDK semantic signals, source index, content hash, and exact-overlap status. The full result and the exact-overlap-excluded result are both included. InjecAgent also reports its 510 direct-harm and 544 data-stealing cases separately
+
+Each JSON result has an outcome hash over case IDs, verdicts, semantic signals, and overlap reasons. The authorization result has a separate hash over legitimate and attacker tool verdicts. Latency is excluded from both hashes, so repeated runs can check decision reproducibility. The runner and manifest hashes are recorded too. A compact Markdown summary is written next to each full JSON. Once all 6 OFF, TF-IDF, and MiniLM runs from the current runner exist, `evaluation_summary.md` is updated with the paper table
+
+Latency is measured with 1 sequential hook call per case after the 3 preflight calls. Package versions, platform, Python, and Go versions are recorded in the JSON output
+
+The latency table contains local descriptive measurements. Raw timing files are not committed, so rerun the 6 pinned commands to reproduce them on another machine
+
+For a quick local check:
+
+```sh
+python3 benchmarks/run_benchmark.py --scanner off --limit 10
+python3 -m pytest benchmarks/test_run_benchmark.py
+```
+
+Limited and split runs get separate output filenames and never update `evaluation_summary.md`
