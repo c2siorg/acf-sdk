@@ -210,6 +210,8 @@ __marimo__/
 
 # Go
 bin/
+sidecar/sidecar
+sidecar/sidecar.exe
 
 # Config (contains no secrets but keep local overrides out of the repo)
 config/sidecar.yaml

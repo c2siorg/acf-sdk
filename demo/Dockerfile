@@ -16,7 +16,7 @@ WORKDIR /app
 COPY sdk/python/ /sdk/
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir "/sdk/[scanners]"
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')"
 
 # The sidecar resolves config/sidecar.yaml relative to its working directory
 # (/app), and policy_dir (../policies/v1) relative to that config file. Without

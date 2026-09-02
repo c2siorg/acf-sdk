@@ -168,7 +168,7 @@ attacks and novel phrasings score in the 0.75-0.85 band, below the
 forwarding threshold. This is expected: TF-IDF captures lexical overlap,
 not semantic meaning.
 
-The sentence-transformer backend (`all-MiniLM-L6-v2`) should produce
+The sentence-transformer backend (`paraphrase-multilingual-MiniLM-L12-v2`) should produce
 cleaner separation between attacks and benign text, allowing the
 threshold to drop to 0.70 or lower. That upgrade is the next PR.
 

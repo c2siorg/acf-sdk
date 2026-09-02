@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "frozen_at": "2026-08-27T06:55:45+05:30",
+  "frozen_at": "2026-09-02T11:17:07+01:00",
   "acf": {
     "repository": "https://github.com/c2siorg/ACF-SDK",
-    "commit": "1fa1b402a5378f02883136eebf5e32318e8e623a",
+    "commit": "ed1d060cd1afeaf238e87ba2d45a3dac1909d218",
     "artifacts": [
       {
         "path": "policies/v1/data/jailbreak_patterns.json",
@@ -19,11 +19,11 @@
       },
       {
         "path": "sdk/python/acf/scanners/attack_library.py",
-        "sha256": "f335b49b2aa9f9a30f2545a40a1079d554ad3159d4643bab1aae14b1915ff2cb"
+        "sha256": "21220e7477ef41975def63afaa66a5c6814e1fade43f60eb4e3622477ae102ec"
       },
       {
         "path": "sdk/python/acf/firewall.py",
-        "sha256": "861c31d3cfb9db1e0b9970cd91e25a31844631b1271fec34c9fcc412177d99cd"
+        "sha256": "503e93a183f64cd7dc2ea8f94146dbabe4e9546e17dc7659f4a5ca1c77a07038"
       }
     ],
     "pattern_provenance": {

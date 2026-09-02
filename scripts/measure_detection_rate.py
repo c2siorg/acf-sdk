@@ -291,7 +291,7 @@ def main():
     report.append("forwarding threshold. This is expected: TF-IDF captures lexical overlap,")
     report.append("not semantic meaning.")
     report.append("")
-    report.append("The sentence-transformer backend (`all-MiniLM-L6-v2`) should produce")
+    report.append("The sentence-transformer backend (`paraphrase-multilingual-MiniLM-L12-v2`) should produce")
     report.append("cleaner separation between attacks and benign text, allowing the")
     report.append("threshold to drop to 0.70 or lower. That upgrade is the next PR.")
     report.append("")

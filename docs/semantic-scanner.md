@@ -137,10 +137,10 @@ Implementation: [`sdk/python/acf/scanners/backends.py`](../sdk/python/acf/scanne
 ### Step 1 — Load the model (startup, once)
 
 ```python
-self._model = SentenceTransformer("all-MiniLM-L6-v2")
+self._model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
 ```
 
-`all-MiniLM-L6-v2` is a 22M parameter neural network trained on hundreds of millions of sentence pairs to place sentences with similar *meaning* close together in a 384-dimensional vector space — regardless of the words used.
+`paraphrase-multilingual-MiniLM-L12-v2` is a 117M parameter neural network trained on hundreds of millions of sentence pairs to place sentences with similar *meaning* close together in a 384-dimensional vector space — regardless of the words used. It covers 50+ languages, so an injection phrased in a language other than English still lands near its English counterpart.
 
 ### Step 2 — Encode the attack library (startup, once)
 

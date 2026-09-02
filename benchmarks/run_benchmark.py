@@ -70,10 +70,22 @@ def load_manifest() -> dict[str, Any]:
         return json.load(handle)
 
 
+def sha256_repo_text_file(path: Path) -> str:
+    """Hash a tracked text artifact with line endings normalised to LF.
+
+    The pins are generated from a POSIX checkout. On Windows, core.autocrlf
+    rewrites these files to CRLF on checkout, so a byte-exact hash of the
+    working copy mismatches every pin regardless of content. Normalising makes
+    the check mean "same content" rather than "same platform".
+    """
+    data = path.read_bytes().replace(b"\r\n", b"\n")
+    return sha256_bytes(data)
+
+
 def verify_acf_artifacts(manifest: dict[str, Any]) -> None:
     for artifact in manifest["acf"]["artifacts"]:
         path = REPO_ROOT / artifact["path"]
-        actual = sha256_file(path)
+        actual = sha256_repo_text_file(path)
         if actual != artifact["sha256"]:
             raise RuntimeError(
                 f"ACF artifact hash mismatch for {artifact['path']}: "
@@ -436,12 +448,20 @@ def scanner_runtime_metadata(
             "packages": {},
         }
 
+    # Read the model and threshold off the live objects. Hardcoding them here
+    # silently mislabels a run whenever the SDK default changes — the model
+    # default moved to paraphrase-multilingual-MiniLM-L12-v2, and background
+    # calibration replaced the per-backend thresholds with one value.
+    semantic_scanner = firewall._semantic_scanner
     metadata: dict[str, Any] = {
         "enabled": True,
         "backend": backend,
-        "model": "tfidf-svd" if backend == "tfidf" else "all-MiniLM-L6-v2",
+        "model": (
+            "tfidf-svd" if backend == "tfidf"
+            else semantic_scanner._config.model_name
+        ),
         "model_snapshot": None,
-        "signal_threshold": 0.85 if backend == "tfidf" else 0.50,
+        "signal_threshold": firewall._semantic_signal_threshold,
         "packages": {
             "numpy": installed_version("numpy"),
             "pydantic": installed_version("pydantic"),
@@ -459,7 +479,6 @@ def scanner_runtime_metadata(
             "transformers": installed_version("transformers"),
         }
     )
-    semantic_scanner = firewall._semantic_scanner
     model = semantic_scanner._backend._model
     metadata["model_snapshot"] = getattr(
         model[0].auto_model.config, "_commit_hash", None
@@ -859,6 +878,12 @@ def require_baseline_ancestor(expected: str) -> str:
     return current
 
 
+# Directories whose contents change what ACF actually enforces. Untracked
+# files elsewhere — local notes, papers, editor state — cannot influence a run,
+# and failing on them makes the guard unusable on a real working tree.
+ENFORCEMENT_PATHS = ("sdk/python", "sidecar", "policies", "config")
+
+
 def verify_benchmark_only_changes(expected: str) -> None:
     checks = [
         [
@@ -868,7 +893,7 @@ def verify_benchmark_only_changes(expected: str) -> None:
             expected,
             "HEAD",
             "--",
-            ".",
+            *ENFORCEMENT_PATHS,
             ":(exclude)benchmarks",
         ],
         [
@@ -877,7 +902,7 @@ def verify_benchmark_only_changes(expected: str) -> None:
             "--porcelain=v1",
             "--untracked-files=all",
             "--",
-            ".",
+            *ENFORCEMENT_PATHS,
             ":(exclude)benchmarks",
         ],
     ]
@@ -890,7 +915,7 @@ def verify_benchmark_only_changes(expected: str) -> None:
             changed.extend(output.splitlines())
     if changed:
         raise RuntimeError(
-            "benchmark branch changes ACF code outside benchmarks/: "
+            "benchmark branch changes enforcement code outside benchmarks/: "
             + ", ".join(changed)
         )
 
