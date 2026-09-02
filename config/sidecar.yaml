@@ -27,6 +27,10 @@ tool_allowlist:                 # restrict to known-safe tools; empty = block al
   - get_weather
   - read_file
 
+tool_param_scan_skip:           # param checks that do not apply to a specific tool parameter
+  calculator:
+    expression: [shell_metacharacter]
+
 memory_key_allowlist:           # restrict to known-safe memory keys; empty = allow all
   - user_preferences
   - session_context

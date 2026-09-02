@@ -332,6 +332,9 @@ trust_weights:
   memory: 0.6
   memory_read: 0.6
 tool_allowlist: []
+tool_param_scan_skip:
+  calculator:
+    expression: [shell_metacharacter]
 memory_key_allowlist: []
 signal_weights:
   jailbreak_pattern: 0.9

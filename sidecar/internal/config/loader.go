@@ -39,6 +39,10 @@ type Config struct {
 	// Empty means all tools are permitted.
 	ToolAllowlist []string `yaml:"tool_allowlist"`
 
+	// ToolParamScanSkip lists checks to skip for specific tool parameters.
+	// Tools and parameters not listed run every check.
+	ToolParamScanSkip map[string]map[string][]string `yaml:"tool_param_scan_skip"`
+
 	// MemoryKeyAllowlist is the set of permitted memory keys for on_memory.
 	// Empty means all keys are permitted.
 	MemoryKeyAllowlist []string `yaml:"memory_key_allowlist"`
@@ -106,6 +110,16 @@ func (c *Config) ToolAllowed(name string) bool {
 	}
 	for _, t := range c.ToolAllowlist {
 		if t == name {
+			return true
+		}
+	}
+	return false
+}
+
+// ParamScanSkipped reports whether check is skipped for a tool parameter.
+func (c *Config) ParamScanSkipped(tool, param, check string) bool {
+	for _, s := range c.ToolParamScanSkip[tool][param] {
+		if s == check {
 			return true
 		}
 	}
