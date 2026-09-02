@@ -1,1 +1,1 @@
-"""Optional framework adapters — LangGraph and LangChain."""
+"""Optional framework adapters — LangGraph, LangChain, and Agent Kernel."""
