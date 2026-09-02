@@ -53,12 +53,13 @@ class Firewall:
                      precedence over the constructor argument.
                      Requires: pip install acf-sdk[scanners]
         semantic_signal_threshold:
-                     Only semantic hits at or above this similarity (0.0-1.0)
-                     are forwarded as signals to the sidecar. When None (the
-                     default), a per-backend value is used: 0.85 for TF-IDF
-                     (high enough to filter surface-overlap noise) and 0.50
-                     for sentence-transformer (which has cleaner score
-                     separation between attacks and benign text).
+                     Only semantic hits at or above this score (0.0-1.0) are
+                     forwarded as signals to the sidecar. When None (the
+                     default), 0.50 is used for every backend: scores are
+                     calibrated against a benign background corpus at scanner
+                     startup, so 0.50 means "less background-like than any
+                     benign reference text" regardless of backend or model.
+                     See scanners/calibration.py.
         semantic_backend:
                      Embedding backend for the semantic scanner. Use "tfidf"
                      for lightweight/CI environments (no PyTorch needed) or
@@ -124,22 +125,18 @@ class Firewall:
             env_backend = os.environ.get("ACF_SEMANTIC_SCAN_BACKEND", "").strip().lower()
             resolved_backend = env_backend if env_backend in ("tfidf", "sentence-transformer") else semantic_backend
 
-            # Per-backend defaults. Sentence-transformer produces lower but
-            # cleaner similarity scores than TF-IDF (attack ~0.6, benign ~0.15
-            # vs TF-IDF's attack ~0.8, benign ~0.8). Thresholds are calibrated
-            # so each backend catches paraphrases without false-positiving on
-            # benign text.
-            if resolved_backend == "sentence-transformer":
-                config = SemanticScannerConfig(
-                    default_threshold=0.45,
-                    block_threshold=0.75,
-                )
-                default_signal_threshold = 0.50
-            else:
-                config = SemanticScannerConfig()  # default: 0.75 / 0.90
-                default_signal_threshold = 0.85
+            # One threshold for every backend. Scores are calibrated against a
+            # benign background corpus at scanner startup (see
+            # scanners/calibration.py), so 0.5 means the same thing —
+            # "less background-like than any benign reference text" — whether
+            # the backend is TF-IDF or a sentence-transformer, and whichever
+            # model that transformer is. This replaces the previous pair of
+            # hand-tuned per-backend constants, which had to be re-measured
+            # every time the model or the pattern library changed.
+            config = SemanticScannerConfig()
+            default_signal_threshold = config.default_threshold
 
-            # User-provided threshold wins over per-backend default.
+            # User-provided threshold wins over the calibrated default.
             self._semantic_signal_threshold = (
                 semantic_signal_threshold
                 if semantic_signal_threshold is not None

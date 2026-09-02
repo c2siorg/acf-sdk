@@ -70,10 +70,24 @@ class SemanticHit(BaseModel):
         description="Attack category (e.g. 'instruction_override', 'context_manipulation')."
     )
     similarity_score: float = Field(
-        ge=0.0, le=1.0, description="Cosine similarity to the closest attack vector."
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Background-calibrated confidence, not raw cosine. 0.5 sits at the "
+            "ceiling of the benign calibration corpus, so >0.5 means 'less "
+            "background-like than any benign reference text'. Comparable across "
+            "backends and models; see scanners/calibration.py."
+        ),
     )
     matched_pattern: str = Field(
         description="The reference attack text that was closest."
+    )
+    raw_similarity: Optional[float] = Field(
+        default=None,
+        description=(
+            "Uncalibrated cosine similarity to matched_pattern. Diagnostic only "
+            "— not comparable across models and not used for decisions."
+        ),
     )
 
 
