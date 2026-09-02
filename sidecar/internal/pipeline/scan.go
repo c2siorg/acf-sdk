@@ -160,17 +160,36 @@ func (s *ScanStage) hasDangerousParam(params map[string]any, toolName, check str
 }
 
 // flattenStrings recursively collects all string leaf values from a map.
+// Slices are walked too: JSON arrays are ordinary tool parameters (argv-style
+// args, path lists), and skipping them let a payload evade the dangerous-param
+// checks simply by being wrapped in [].
 func flattenStrings(m map[string]any) string {
 	var parts []string
 	for _, v := range m {
-		switch val := v.(type) {
-		case string:
-			parts = append(parts, val)
-		case map[string]any:
-			parts = append(parts, flattenStrings(val))
+		if s := flattenValue(v); s != "" {
+			parts = append(parts, s)
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// flattenValue collects string leaves from any JSON-shaped value.
+func flattenValue(v any) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case map[string]any:
+		return flattenStrings(val)
+	case []any:
+		var parts []string
+		for _, item := range val {
+			if s := flattenValue(item); s != "" {
+				parts = append(parts, s)
+			}
+		}
+		return strings.Join(parts, " ")
+	}
+	return ""
 }
 
 // checkMemoryAllowlist emits a signal if the memory key is not in the allowlist.

