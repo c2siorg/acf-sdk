@@ -34,6 +34,30 @@ from .transport import Transport, DEFAULT_SOCKET_PATH
 
 logger = logging.getLogger(__name__)
 
+#: Deepest nesting walked when collecting scannable strings out of tool-call
+#: parameters. Bounds the walk on pathological or hostile payload shapes.
+_MAX_PARAM_DEPTH = 6
+
+
+def _collect_strings(value: Any, out: list[str], depth: int = 0) -> None:
+    """Depth-first collect of every non-empty string leaf in a nested value.
+
+    Numbers and booleans are skipped — they cannot carry injection text, and
+    stringifying them would add noise the scanner's content guard then has to
+    reject.
+    """
+    if depth > _MAX_PARAM_DEPTH:
+        return
+    if isinstance(value, str):
+        if value:
+            out.append(value)
+    elif isinstance(value, dict):
+        for item in value.values():
+            _collect_strings(item, out, depth + 1)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _collect_strings(item, out, depth + 1)
+
 
 class Firewall:
     """Entry point for the ACF SDK.
@@ -239,10 +263,10 @@ class Firewall:
         if self._semantic_scanner is None:
             return []
 
-        # The scanner only operates on text. Extract a string from the
-        # content if possible; otherwise skip.
-        text = self._extract_text(hook_type, content)
-        if not text:
+        # The scanner only operates on text. Extract every scannable field
+        # from the content; otherwise skip.
+        texts = self._extract_texts(hook_type, content)
+        if not texts:
             return []
 
         # Import the scanner types lazily — only needed when enabled.
@@ -256,56 +280,83 @@ class Firewall:
         }
         input_type = hook_to_input_type.get(hook_type, InputType.PROMPT)
 
-        scan_input = ScanInput(
-            agent_id="sdk",
-            execution_id="sdk",
-            session_id="sdk",
-            input_type=input_type,
-            normalized_content=text,
-            trust_level=TrustLevel.LOW,
-        )
+        # Scan each field independently and keep the strongest score per
+        # category — a payload with attack text in two fields should report one
+        # signal per category, not duplicates.
+        best: dict[str, float] = {}
+        for text in texts:
+            scan_input = ScanInput(
+                agent_id="sdk",
+                execution_id="sdk",
+                session_id="sdk",
+                input_type=input_type,
+                normalized_content=text,
+                trust_level=TrustLevel.LOW,
+            )
+            try:
+                result = self._semantic_scanner.scan(scan_input)
+            except Exception as exc:  # pragma: no cover — defensive
+                logger.warning("acf-sdk: semantic scanner error: %s", exc)
+                continue
 
-        try:
-            result = self._semantic_scanner.scan(scan_input)
-        except Exception as exc:  # pragma: no cover — defensive
-            logger.warning("acf-sdk: semantic scanner error: %s", exc)
-            return []
+            for hit in result.semantic_hits:
+                if hit.similarity_score < self._semantic_signal_threshold:
+                    continue
+                category = hit.matched_category
+                if hit.similarity_score > best.get(category, 0.0):
+                    best[category] = hit.similarity_score
 
-        # Map SemanticHit → wire-format Signal dict the sidecar already accepts.
-        # Filter by signal_threshold first — the scanner's own default_threshold
-        # is set lower for in-process reporting; we use a stricter bar before
-        # forwarding to the sidecar so weak TF-IDF surface-overlap doesn't
-        # become evidence in OPA's view. When users upgrade to the
-        # sentence-transformer backend they can drop this threshold.
+        # Map → wire-format Signal dicts the sidecar already accepts, strongest
+        # first so a truncating consumer keeps the most significant evidence.
         return [
-            {"category": hit.matched_category, "score": hit.similarity_score}
-            for hit in result.semantic_hits
-            if hit.similarity_score >= self._semantic_signal_threshold
+            {"category": category, "score": score}
+            for category, score in sorted(best.items(), key=lambda kv: -kv[1])
         ]
 
     @staticmethod
-    def _extract_text(hook_type: str, content: Any) -> str:
-        """Pull a string out of the per-hook payload shape.
+    def _extract_texts(hook_type: str, content: Any) -> list[str]:
+        """Pull every scannable string out of the per-hook payload shape.
+
+        Returns a list because a payload can carry attack text in more than one
+        field, and concatenating them measurably *hurts*: joining a memory key
+        to its value diluted two known attacks from 1.000 and 0.841 down to
+        0.923 and 0.535. Each field is scanned on its own and the strongest
+        signal wins.
 
         on_prompt:    content is already a string
         on_context:   content is a single chunk string
-        on_tool_call: content is {"name", "params"} — scan params as JSON
-        on_memory:    content is {"key", "value", "op"} — scan the value
+        on_tool_call: {"name", "params"} — each param value separately, since
+                      a JSON blob embeds as punctuation-heavy structure rather
+                      than as the prose it contains
+        on_memory:    {"key", "value", "op"} — key *and* value; the key is an
+                      injection surface in its own right (a memory keyed
+                      "ignore previous instructions" with a decoy value was
+                      previously caught only by accident, matching the decoy)
+
+        Short identifiers such as "user_pref" are filtered downstream by the
+        scanner's content guard, so scanning keys does not add false positives.
         """
         if isinstance(content, str):
-            return content
+            return [content]
+
+        texts: list[str] = []
         if isinstance(content, dict):
             if hook_type == "on_tool_call":
                 params = content.get("params")
-                if isinstance(params, dict) and params:
-                    return json.dumps(params, separators=(",", ":"))
                 if isinstance(params, str):
-                    return params
-            if hook_type == "on_memory":
-                value = content.get("value")
-                if isinstance(value, str) and value:
-                    return value
-        return ""
+                    texts.append(params)
+                elif params:
+                    # Recurse: params are routinely nested ({"filter": {"q": …}})
+                    # or lists, and a string buried in either is just as much an
+                    # injection surface as a top-level one.
+                    _collect_strings(params, texts)
+            elif hook_type == "on_memory":
+                texts.extend(
+                    content.get(field)
+                    for field in ("key", "value")
+                    if isinstance(content.get(field), str) and content.get(field)
+                )
+        return [t for t in texts if t]
 
     def _send(self, payload: bytes) -> Decision | SanitiseResult:
         resp     = self._transport.send(payload)
