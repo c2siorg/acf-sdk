@@ -83,7 +83,8 @@ func TestLoadResolvesRelativePolicyDirViaConfigSymlink(t *testing.T) {
 	}
 
 	if err := os.Symlink(realConfigDir, linkedConfigDir); err != nil {
-		t.Fatalf("Symlink: %v", err)
+		// Windows without Developer Mode cannot create directory symlinks.
+		t.Skipf("symlink not available: %v", err)
 	}
 
 	configPath := filepath.Join(linkedConfigDir, "sidecar.yaml")
