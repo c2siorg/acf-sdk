@@ -1,3 +1,3 @@
-/**
- * Barrel exports for the ACF TypeScript SDK (v2 — deferred).
- */
+export { Decision, SanitiseResult, ChunkResult, RiskContext, FirewallError, FirewallConnectionError, FirewallBlocked } from './models';
+export { FrameError } from './frame';
+export { Firewall } from './firewall';

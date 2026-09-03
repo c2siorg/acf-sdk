@@ -64,3 +64,22 @@ jobs:
       - name: pytest
         working-directory: sdk/python
         run: python -m pytest -v
+
+  typescript:
+    name: TypeScript tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache-dependency-path: sdk/typescript/package-lock.json
+
+      - name: Install dependencies
+        working-directory: sdk/typescript
+        run: npm ci
+
+      - name: Run tests
+        working-directory: sdk/typescript
+        run: npm test
