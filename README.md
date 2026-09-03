@@ -5,7 +5,7 @@
 
 A Zero Trust security layer for LLM agents. Enforces policy-driven validation at every point an agent ingests input — not just at the front door.
 
-> **Status: Phase 3 complete — OPA policy engine running. Phase 4 (OTel observability + integration tests) next.**
+> **Status: Phase 4 complete, with OTel observability and integration tests wired in**
 
 **New to ACF-SDK?** Start with the [layman overview](docs/overview.md) to understand what the SDK and sidecar do before diving into the details below.
 
@@ -45,7 +45,7 @@ Every decision is one of three outcomes:
 | `SANITISE` | Payload contains a threat — return scrubbed version with warning markers |
 | `BLOCK` | Hard block — agent must not proceed with this input |
 
-Enforcement latency: **4–8ms typical, ~10ms worst case.** Observability spans emit asynchronously and never touch the enforcement path.
+Enforcement latency: **4-8ms typical, ~10ms worst case.** Span export and audit file writes are async, and telemetry does not change policy decisions.
 
 ---
 
@@ -208,13 +208,11 @@ make test            # Go tests
 make sdk-test-python # Python tests
 ```
 
-### Docker (sidecar + optional OTel collector)
+### Docker (sidecar and optional OTel collector)
 
 ```bash
-# Set your key in the environment first, then:
-docker compose up -d
-
-# With observability (OTel collector):
+# Set your key in the environment first, then start the sidecar and collector:
+export ACF_HMAC_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 docker compose --profile observability up -d
 ```
 
@@ -243,7 +241,7 @@ acf-sdk/
 | 1 | Wire protocol + HMAC/nonce crypto | **Complete** — 23 Go tests, 35 Python tests |
 | 2 | Pipeline stages (validate/normalise/scan/aggregate) | **Complete** — 49 Go tests |
 | 3 | OPA integration + Rego policies | **Complete** — real policy evaluation, sanitise executor, hot reload |
-| 4 | OTel observability + integration test suite | Pending |
+| 4 | OTel observability + integration test suite | **Complete**, spans, audit log, and live sidecar tests |
 | v2 | Stateful session risk, additional hooks, TypeScript SDK | Deferred |
 
 ---
