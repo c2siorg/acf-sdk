@@ -160,7 +160,7 @@ func TestAsyncSink_EmitAfterCloseNoop(t *testing.T) {
 		t.Errorf("expected no writes after Close, got %d bytes", buf.Len())
 	}
 	if err := sink.Close(); err != nil {
-		t.Fatalf("second close: %v", err)
+		t.Fatalf("later close: %v", err)
 	}
 }
 
@@ -189,7 +189,7 @@ func TestAsyncSink_EmitAfterMuProtectedCloseDoesNotPanic(t *testing.T) {
 }
 
 func TestAsyncSink_ConcurrentEmitAndClose(t *testing.T) {
-	// Hammer Emit from many goroutines while a second goroutine races Close.
+	// Hammer Emit from many goroutines while another goroutine races Close.
 	// Without the mu guard this would panic with "send on closed channel".
 	for trial := 0; trial < 50; trial++ {
 		var buf safeBuffer
@@ -219,7 +219,7 @@ func TestAsyncSink_ConcurrentEmitAndClose(t *testing.T) {
 		// Close is idempotent; calling again from the test goroutine must
 		// not panic and must not return a new error.
 		if err := sink.Close(); err != nil {
-			t.Errorf("second close: %v", err)
+			t.Errorf("later close: %v", err)
 		}
 	}
 }
@@ -247,7 +247,7 @@ func TestAsyncSink_ConcurrentCloseWaitsForDrain(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("first Close did not close the sink")
+			t.Fatal("initial Close did not close the sink")
 		}
 		runtime.Gosched()
 	}
@@ -256,7 +256,7 @@ func TestAsyncSink_ConcurrentCloseWaitsForDrain(t *testing.T) {
 	go func() { secondDone <- sink.Close() }()
 	select {
 	case err := <-secondDone:
-		t.Fatalf("second Close returned before drain completed: %v", err)
+		t.Fatalf("later Close returned before drain completed: %v", err)
 	case <-time.After(100 * time.Millisecond):
 	}
 

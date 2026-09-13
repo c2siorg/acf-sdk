@@ -1,8 +1,8 @@
 # Observability
 
-Phase 4 introduces two telemetry surfaces on the sidecar:
+Phase 4 introduces 2 telemetry surfaces on the sidecar:
 
-1. OpenTelemetry spans per pipeline run plus one child span per stage
+1. OpenTelemetry spans per pipeline run plus 1 child span per stage
 2. A structured JSON audit log for pipeline results and transport rejections
 
 Telemetry does not change the decision the PDP returns. Span export and audit
@@ -41,12 +41,12 @@ removed during setup. Set `insecure: true` when the collector uses plaintext
 HTTP
 
 Once spans land, open http://localhost:16686 and pick `acf-sidecar` in the
-service dropdown. Every `pipeline.Run` appears as a root span with one child
+service dropdown. Every `pipeline.Run` appears as a root span with 1 child
 per stage
 
 ## Span layout
 
-One run through the PDP produces the following trace shape:
+A PDP run produces the following trace shape:
 
 ```
 pipeline.Run              hook_type, provenance, decision, score, duration_ms
@@ -80,7 +80,7 @@ honours that upstream decision instead of applying its own ratio.
 
 ## Audit log schema
 
-Every completed pipeline run emits one JSON object on its own line. Invalid
+Every completed pipeline run emits 1 JSON object on its own line. Invalid
 magic, protocol version, HMAC, nonce replay, and signed JSON are also recorded
 as block entries with `blocked_at` set to `transport`. A client that disconnects
 before sending a complete frame does not create an audit entry. Field order is
@@ -115,10 +115,10 @@ The audit writer and the span attributes never record:
 - `RiskContext.CanonicalText` (the normalised text the scanner operates on)
 
 Signal categories can come from sidecar scanners or the signed Python SDK
-semantic scanner. The PDP does not rewrite those signed category strings before
-OPA or audit. SDK scanner implementations must use fixed category names and
-must not put user content in a category. The audit log also records provenance
-and session ID from the signed risk context
+semantic scanner. Before writing an audit entry, the PDP keeps only category
+names found in the active policy weight table. Unknown inbound category text
+is omitted. The audit log also records provenance and session ID from the
+signed risk context
 
 Only decision metadata, named signals, and timing land in the sinks. This
 matches the spirit of the OWASP LLM Top 10 prompt-leakage guidance applied
@@ -142,20 +142,21 @@ prompt we ever evaluated
 ## Tuning
 
 - `sample_ratio` controls head-based sampling. `1.0` samples everything;
-  `0.0` disables span emission entirely. The literal zero is honoured, so
-  operators can leave the block configured but turn spans off
+  `0.0` disables span emission entirely. That value is honoured, so
+  operators can leave the block configured but turn spans off. Startup rejects
+  non-finite values and values outside `0.0` to `1.0`
 - `audit_buffer` sets the async audit channel depth. The default (1024) is
   tuned for low-latency local development. Production deployments that
-  expect sustained high QPS should raise it to keep the drop counter at
-  zero under peak
+  expect sustained high QPS should raise it to keep the drop counter at 0
+  during peak load
 - `audit_path` routes audit lines to a file. Parent directories are
   created on startup. New files use `0600` permissions and new parent
-  directories use `0700`. Rotate externally (logrotate, kubernetes pod logs).
-  Leave empty or use `-` for stdout
+  directories use `0700`. Symlink targets are rejected. Rotate externally
+  (logrotate, kubernetes pod logs). Leave empty or use `-` for stdout
 
 ## Benchmarks
 
-From a local 5-run sample on August 28, 2026:
+From a local 5-run sample on September 13, 2026:
 
 ```bash
 go test -run '^$' -bench '^BenchmarkPipeline_' -benchmem -benchtime=2s -count=5 -cpu=1 ./internal/pipeline
@@ -163,9 +164,9 @@ go test -run '^$' -bench '^BenchmarkPipeline_' -benchmem -benchtime=2s -count=5 
 
 | Configuration             | Median ns/op | B/op | allocs/op |
 |---------------------------|-------------:|-----:|----------:|
-| No telemetry              | 3,837 | 1,776 | 29 |
-| Audit only                | 4,153 | 2,025 | 30 |
-| Sampled tracer plus audit | 6,207 | 5,745 | 44 |
+| No telemetry              | 3,777 | 1,744 | 28 |
+| Audit only                | 4,195 | 2,059 | 30 |
+| Sampled tracer plus audit | 6,330 | 5,781 | 44 |
 
 These medians cover the small payload in `bench_test.go`. They show the local
 cost of each configuration, not the expected percentage overhead for every

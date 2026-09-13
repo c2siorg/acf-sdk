@@ -21,6 +21,13 @@ type recordingAuditSink struct {
 	entries []telemetry.AuditEntry
 }
 
+type testSignalCategories map[string]struct{}
+
+func (s testSignalCategories) SignalCategoryAllowed(category string) bool {
+	_, ok := s[category]
+	return ok
+}
+
 func (s *recordingAuditSink) Emit(entry telemetry.AuditEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -56,18 +63,86 @@ func newTelemetryTestPipeline(
 	})
 
 	sink := &recordingAuditSink{}
+	weights := testWeights()
 	pl := NewWithOptions(cfg, []Stage{
 		NewValidateStage(),
 		NewNormaliseStage(),
 		NewScanStage(cfg, patterns),
-		NewAggregateStage(cfg),
+		NewAggregateStage(cfg, weights),
 	}, Options{
-		Evaluator:     evaluator,
+		Evaluator:        evaluator,
+		SignalCategories: weights,
+		Tracer:           provider.Tracer("pipeline-test"),
+		AuditSink:        sink,
+		PolicyVersion:    "test-v1",
+	})
+	return pl, recorder, sink
+}
+
+func TestPipeline_AuditOmitsUnknownInboundSignalCategories(t *testing.T) {
+	cfg := testConfig(true)
+	pl, _, sink := newTelemetryTestPipeline(t, cfg, &mockEvaluator{decision: "ALLOW"}, nil)
+	rc := &riskcontext.RiskContext{
+		HookType:   "on_prompt",
+		Provenance: "user",
+		Payload:    "hello",
+		Signals: []riskcontext.Signal{
+			{Category: "jailbreak_pattern"},
+			{Category: "attacker-controlled\nlog text"},
+		},
+	}
+
+	pl.RunContext(context.Background(), rc)
+	audit := sink.entry(t)
+	if len(audit.Signals) != 1 || audit.Signals[0] != "jailbreak_pattern" {
+		t.Fatalf("audit signals = %q, want only the configured category", audit.Signals)
+	}
+}
+
+func TestPipeline_AuditAllowsExplicitUnweightedSignalCategories(t *testing.T) {
+	cfg := testConfig(true)
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	t.Cleanup(func() {
+		if err := provider.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown tracer provider: %v", err)
+		}
+	})
+
+	sink := &recordingAuditSink{}
+	weights := testWeights()
+	pl := NewWithOptions(cfg, []Stage{
+		NewValidateStage(),
+		NewNormaliseStage(),
+		NewScanStage(cfg, nil),
+		NewAggregateStage(cfg, weights),
+	}, Options{
+		Evaluator: &mockEvaluator{decision: "ALLOW"},
+		SignalCategories: testSignalCategories{
+			"jailbreak_pattern": {},
+			"content_scan":      {},
+		},
 		Tracer:        provider.Tracer("pipeline-test"),
 		AuditSink:     sink,
 		PolicyVersion: "test-v1",
 	})
-	return pl, recorder, sink
+
+	rc := &riskcontext.RiskContext{
+		HookType:   "on_memory",
+		Provenance: "user",
+		Payload:    "hello",
+		Signals: []riskcontext.Signal{
+			{Category: "jailbreak_pattern"},
+			{Category: "content_scan"},
+			{Category: "attacker-controlled\nlog text"},
+		},
+	}
+
+	pl.RunContext(context.Background(), rc)
+	audit := sink.entry(t)
+	if len(audit.Signals) != 2 || audit.Signals[0] != "jailbreak_pattern" || audit.Signals[1] != "content_scan" {
+		t.Fatalf("audit signals = %q, want weighted and explicit categories only", audit.Signals)
+	}
 }
 
 func spansByName(t *testing.T, spans []sdktrace.ReadOnlySpan) map[string]sdktrace.ReadOnlySpan {

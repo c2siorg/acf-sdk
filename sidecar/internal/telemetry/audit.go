@@ -1,5 +1,5 @@
 // audit.go — structured audit log formatting.
-// Writes one JSON line per pipeline result or audited transport rejection.
+// Writes 1 JSON line per pipeline result or audited transport rejection.
 // Fields: hook_type, decision, score, signals, provenance, session_id, policy_version, trace_id.
 package telemetry
 
@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// AuditEntry is one record written to the audit sink. Raw payloads and
+// AuditEntry is a record written to the audit sink. Raw payloads and
 // canonical text are deliberately never included.
 type AuditEntry struct {
 	Timestamp      string   `json:"ts"`

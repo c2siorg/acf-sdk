@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -54,8 +55,7 @@ type Config struct {
 	DeprecatedSignalWeights map[string]float64 `yaml:"signal_weights"`
 
 	// Telemetry controls OpenTelemetry tracing and the structured audit log.
-	// The zero value installs noop sinks so enforcement runs identically with
-	// or without observability wired up.
+	// An empty endpoint disables spans. An empty audit path writes to stdout.
 	Telemetry TelemetryConfig `yaml:"telemetry"`
 }
 
@@ -70,7 +70,7 @@ type TelemetryConfig struct {
 	// acf-sidecar when empty.
 	ServiceName string `yaml:"service_name"`
 
-	// SampleRatio is the head-based sampling ratio in [0, 1]. A literal zero
+	// SampleRatio is the head-based sampling ratio in [0, 1]. A value of 0
 	// is honoured and disables span emission entirely.
 	SampleRatio float64 `yaml:"sample_ratio"`
 
@@ -125,7 +125,13 @@ func Load(path string) (*Config, error) {
 
 	// Resolve relative paths from the config file location so the runtime
 	// behaves the same regardless of the process working directory.
-	cfg.PolicyDir = resolveRelative(filepath.Dir(path), cfg.PolicyDir)
+	configDir := filepath.Dir(path)
+	cfg.PolicyDir = resolveRelative(configDir, cfg.PolicyDir)
+	auditPath, err := resolveAuditPath(configDir, cfg.Telemetry.AuditPath)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Telemetry.AuditPath = auditPath
 
 	return cfg, nil
 }
@@ -221,14 +227,25 @@ func defaults() *Config {
 }
 
 func validate(c *Config) error {
-	if c.Thresholds.BlockScore < 0 || c.Thresholds.BlockScore > 1 {
+	if math.IsNaN(c.Thresholds.BlockScore) || math.IsInf(c.Thresholds.BlockScore, 0) ||
+		c.Thresholds.BlockScore < 0 || c.Thresholds.BlockScore > 1 {
 		return errors.New("thresholds.block_score must be between 0.0 and 1.0")
 	}
-	if c.Thresholds.SanitiseScore < 0 || c.Thresholds.SanitiseScore > 1 {
+	if math.IsNaN(c.Thresholds.SanitiseScore) || math.IsInf(c.Thresholds.SanitiseScore, 0) ||
+		c.Thresholds.SanitiseScore < 0 || c.Thresholds.SanitiseScore > 1 {
 		return errors.New("thresholds.sanitise_score must be between 0.0 and 1.0")
 	}
 	if c.Thresholds.SanitiseScore > c.Thresholds.BlockScore {
 		return errors.New("thresholds.sanitise_score must be <= thresholds.block_score")
+	}
+	if math.IsNaN(c.Telemetry.SampleRatio) || math.IsInf(c.Telemetry.SampleRatio, 0) ||
+		c.Telemetry.SampleRatio < 0 || c.Telemetry.SampleRatio > 1 {
+		return errors.New("telemetry.sample_ratio must be finite and between 0.0 and 1.0")
+	}
+	for provenance, weight := range c.TrustWeights {
+		if math.IsNaN(weight) || math.IsInf(weight, 0) || weight < 0 || weight > 1 {
+			return fmt.Errorf("trust_weights.%s must be finite and between 0.0 and 1.0", provenance)
+		}
 	}
 	return nil
 }
@@ -390,4 +407,19 @@ func resolveRelative(baseDir, path string) string {
 		return filepath.Clean(path)
 	}
 	return filepath.Clean(filepath.Join(baseDir, path))
+}
+
+func resolveAuditPath(baseDir, path string) (string, error) {
+	if path == "" || path == "-" {
+		return path, nil
+	}
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path), nil
+	}
+
+	canonicalBaseDir, err := filepath.EvalSymlinks(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("config: cannot canonicalize config directory %s for audit path: %w", baseDir, err)
+	}
+	return filepath.Clean(filepath.Join(canonicalBaseDir, path)), nil
 }

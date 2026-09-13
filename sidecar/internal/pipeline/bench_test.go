@@ -48,8 +48,9 @@ func BenchmarkPipeline_WithAudit(b *testing.B) {
 	sink := telemetry.NewAsyncSink(io.Discard, 4096)
 	defer sink.Close()
 	pl := NewWithOptions(cfg, benchStages(cfg), Options{
-		AuditSink:     sink,
-		PolicyVersion: "v1",
+		AuditSink:        sink,
+		SignalCategories: testWeights(),
+		PolicyVersion:    "v1",
 	})
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -65,9 +66,10 @@ func BenchmarkPipeline_WithTracerAndAudit(b *testing.B) {
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.AlwaysSample()))
 	b.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 	pl := NewWithOptions(cfg, benchStages(cfg), Options{
-		Tracer:        tp.Tracer("acf-sidecar-benchmark"),
-		AuditSink:     sink,
-		PolicyVersion: "v1",
+		Tracer:           tp.Tracer("acf-sidecar-benchmark"),
+		AuditSink:        sink,
+		SignalCategories: testWeights(),
+		PolicyVersion:    "v1",
 	})
 	b.ReportAllocs()
 	b.ResetTimer()

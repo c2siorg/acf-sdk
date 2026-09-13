@@ -1,4 +1,4 @@
-# socket_path is auto-detected by platform — leave unset unless you need to override.
+# socket_path is auto-detected by platform: leave unset unless you need to override.
 # Linux/macOS default: /tmp/acf.sock
 # Windows default:     \\.\pipe\acf
 # socket_path: /tmp/acf.sock
@@ -8,12 +8,16 @@ log_level: info
 pipeline:
   strict_mode: true             # false = run all stages even on hard block (debug/audit mode)
 
+# Standalone fallback compatibility only. Production pipelines using
+# policy.Engine read thresholds from policies/v1/data/policy_config.yaml.
 thresholds:
   block_score: 0.85             # risk score >= this → BLOCK
   sanitise_score: 0.50          # risk score >= this → SANITISE (used by OPA in Phase 3)
 
+# Standalone fallback compatibility only. Production pipelines using
+# policy.Engine read trust weights from policies/v1/data/policy_config.yaml.
 trust_weights:
-  user_input: 1.0               # highest — direct prompt injection risk
+  user_input: 1.0               # highest: direct prompt injection risk
   user: 1.0
   tool_output: 0.8
   rag_chunk: 0.7

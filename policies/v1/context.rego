@@ -74,21 +74,21 @@ _effective_score := input.score * trust_multiplier
 # ---------------------------------------------------------------------
 
 decision := "BLOCK" if {
-    _effective_score >= 0.8
+    _effective_score >= _block_score
     not _has_hard_block
     not _has_embedded_instruction
 }
 
 decision := "SANITISE" if {
-    _effective_score >= 0.4
-    _effective_score < 0.8
+    _effective_score >= _sanitise_score
+    _effective_score < _block_score
     not _has_hard_block
     not _has_embedded_instruction
 }
 
 sanitise_targets contains "context_chunk" if {
-    _effective_score >= 0.4
-    _effective_score < 0.8
+    _effective_score >= _sanitise_score
+    _effective_score < _block_score
     not _has_hard_block
     not _has_embedded_instruction
 }
@@ -104,7 +104,7 @@ decision := "SANITISE" if {
     input.payload_size_bytes > _max_chunk_bytes
     not _has_hard_block
     not _has_embedded_instruction
-    _effective_score < 0.4
+    _effective_score < _sanitise_score
 }
 
 sanitise_targets contains "split_chunk" if {
@@ -120,6 +120,14 @@ _max_chunk_bytes := data.config.max_chunk_bytes if {
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
+
+_block_score := data.config.thresholds.block_score if {
+    data.config.thresholds.block_score
+} else := 0.85
+
+_sanitise_score := data.config.thresholds.sanitise_score if {
+    data.config.thresholds.sanitise_score
+} else := 0.50
 
 _has_hard_block if {
     some sig in input.signals

@@ -211,7 +211,7 @@ make sdk-test-python # Python tests
 ### Docker (sidecar and optional OTel collector)
 
 ```bash
-# Set your key in the environment first, then start the sidecar and collector:
+# Set your key before starting the sidecar and collector:
 export ACF_HMAC_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 docker compose --profile observability up -d
 ```

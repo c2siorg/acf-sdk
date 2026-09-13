@@ -1,7 +1,11 @@
 package transport
 
 import (
+	"bytes"
+	"encoding/json"
+	"log"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -10,6 +14,7 @@ import (
 	"github.com/acf-sdk/sidecar/internal/crypto"
 	"github.com/acf-sdk/sidecar/internal/pipeline"
 	"github.com/acf-sdk/sidecar/internal/telemetry"
+	"github.com/acf-sdk/sidecar/pkg/riskcontext"
 )
 
 func newTestListener(t *testing.T) (*Listener, *crypto.Signer, string) {
@@ -65,6 +70,20 @@ func (s *capturedAuditSink) Emit(entry telemetry.AuditEntry) {
 
 func (*capturedAuditSink) Close() error    { return nil }
 func (*capturedAuditSink) Dropped() uint64 { return 0 }
+
+type attackerControlledStage struct {
+	blockedAt string
+	signal    string
+	score     float64
+}
+
+func (s attackerControlledStage) Name() string { return s.blockedAt }
+
+func (s attackerControlledStage) Run(rc *riskcontext.RiskContext) bool {
+	rc.Signals = append(rc.Signals, riskcontext.Signal{Category: s.signal})
+	rc.Score = s.score
+	return true
+}
 
 func requireAuditCategory(t *testing.T, sink *capturedAuditSink, category string) {
 	t.Helper()
@@ -231,6 +250,104 @@ func TestListener_BadJSONAudit(t *testing.T) {
 		t.Fatalf("expected BLOCK, got %v", resp)
 	}
 	requireAuditCategory(t, audit, "transport:invalid_json")
+}
+
+func TestListener_PipelineLogExcludesRequestData(t *testing.T) {
+	const (
+		sessionID    = "session-attacker\x1b[31m"
+		hookType     = "hook-attacker\x00"
+		signal       = "signal-attacker\rforged"
+		blockedAt    = "blocked-at-attacker\t"
+		expectedLine = "transport: pipeline decision=2 score=0.77 signal_count=1"
+	)
+
+	payload, err := json.Marshal(map[string]any{
+		"hook_type":  hookType,
+		"payload":    "hello",
+		"session_id": sessionID,
+		"provenance": "user",
+		"signals":    []any{},
+		"score":      0,
+		"state":      nil,
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	pl := pipeline.New(&config.Config{
+		Pipeline: config.PipelineConfig{StrictMode: true},
+	}, []pipeline.Stage{
+		attackerControlledStage{
+			blockedAt: blockedAt,
+			signal:    signal,
+			score:     0.77,
+		},
+	})
+	signer, err := crypto.NewSigner([]byte("test-key-32-bytes-long-padded!!!"))
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	nonceStore := crypto.NewNonceStore(5 * time.Minute)
+	t.Cleanup(nonceStore.Stop)
+	listener := &Listener{
+		cfg: Config{
+			Signer:     signer,
+			NonceStore: nonceStore,
+			Pipeline:   pl,
+		},
+		conns: make(map[net.Conn]struct{}),
+	}
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() {
+		serverConn.Close()
+		clientConn.Close()
+	})
+	go listener.handleConn(serverConn)
+
+	var logs bytes.Buffer
+	previousWriter := log.Writer()
+	previousFlags := log.Flags()
+	previousPrefix := log.Prefix()
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	log.SetPrefix("")
+	defer func() {
+		log.SetOutput(previousWriter)
+		log.SetFlags(previousFlags)
+		log.SetPrefix(previousPrefix)
+	}()
+
+	frame, err := EncodeRequest(payload, signer)
+	if err != nil {
+		t.Fatalf("EncodeRequest: %v", err)
+	}
+	clientConn.SetDeadline(time.Now().Add(2 * time.Second)) //nolint:errcheck
+	if _, err := clientConn.Write(frame); err != nil {
+		t.Fatalf("write frame: %v", err)
+	}
+	buf := make([]byte, 512)
+	n, err := clientConn.Read(buf)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if n < 1 || buf[0] != DecisionBlock {
+		t.Fatalf("expected BLOCK, got %v", buf[:n])
+	}
+
+	output := logs.String()
+	if !strings.Contains(output, expectedLine) {
+		t.Fatalf("missing fixed pipeline log fields")
+	}
+	for _, attackerValue := range []string{sessionID, hookType, signal, blockedAt} {
+		if strings.Contains(output, attackerValue) {
+			t.Errorf("pipeline log contains attacker-controlled value")
+		}
+	}
+	for _, control := range []string{"\x00", "\x1b", "\r", "\t"} {
+		if strings.Contains(output, control) {
+			t.Errorf("pipeline log contains control character")
+		}
+	}
 }
 
 func TestDecodeRejectCategory(t *testing.T) {

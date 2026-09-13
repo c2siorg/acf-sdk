@@ -1,4 +1,4 @@
-// main.go — sidecar entrypoint.
+// main.go: sidecar entrypoint.
 // Phase 2: loads config, builds the enforcement pipeline, and starts the
 // IPC listener (UDS on Linux/macOS, named pipe on Windows).
 package main
@@ -119,17 +119,18 @@ func main() {
 		pipeline.NewScanStage(cfg, patterns.Entries),
 		pipeline.NewAggregateStage(cfg, eng),
 	}, pipeline.Options{
-		Evaluator:     eng,
-		Tracer:        tracer,
-		AuditSink:     audit,
-		PolicyVersion: cfg.Telemetry.PolicyVersion,
+		Evaluator:        eng,
+		SignalCategories: eng,
+		Tracer:           tracer,
+		AuditSink:        audit,
+		PolicyVersion:    cfg.Telemetry.PolicyVersion,
 	})
 
 	mode := "strict"
 	if !cfg.Pipeline.StrictMode {
 		mode = "non-strict"
 	}
-	log.Printf("sidecar: pipeline ready (mode=%s, block_threshold=%.2f)", mode, cfg.Thresholds.BlockScore)
+	log.Printf("sidecar: pipeline ready (mode=%s, block_threshold=%.2f)", mode, eng.Thresholds().BlockScore)
 
 	// 8. Resolve IPC address (platform-specific default if unset).
 	connector := transport.DefaultConnector()
@@ -222,18 +223,21 @@ func openAuditWriter(path string) (io.Writer, func() error, error) {
 	if path == "" || path == "-" {
 		return os.Stdout, nil, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, nil, err
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := openAuditFile(path)
 	if err != nil {
 		return nil, nil, err
 	}
 	if err := f.Chmod(0o600); err != nil {
 		_ = f.Close()
-		return nil, nil, err
+		return nil, nil, auditFileError("permission setup")
 	}
 	return f, f.Close, nil
+}
+
+type auditFileError string
+
+func (e auditFileError) Error() string {
+	return "audit file " + string(e) + " failed"
 }
 
 // unweightedCategories returns the sorted pattern categories with no entry in

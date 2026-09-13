@@ -1,4 +1,4 @@
-// Package pipeline orchestrates the four enforcement stages in order:
+// Package pipeline orchestrates the 4 enforcement stages in order:
 // validate → normalise → scan → aggregate, then an OPA policy evaluation.
 //
 // In strict mode (default), the pipeline short-circuits and returns BLOCK
@@ -29,7 +29,7 @@ import (
 
 // Result is the output of a pipeline run.
 type Result struct {
-	// Decision is one of decision.Allow, decision.Sanitise, decision.Block.
+	// Decision uses decision.Allow, decision.Sanitise, or decision.Block.
 	Decision byte
 	// Score is the final aggregated risk score (0.0–1.0).
 	Score float64
@@ -54,30 +54,46 @@ type Stage interface {
 // Evaluator is implemented by policy.Engine. It evaluates OPA policy for a
 // given RiskContext and returns the decision string ("ALLOW"/"SANITISE"/"BLOCK")
 // and the list of sanitise_targets declared by Rego.
-// Defined here (not in the policy package) to keep the import one-directional:
+// Defined here (not in the policy package) to keep the import single-directional:
 // pipeline imports policy; policy imports only riskcontext, so there is no cycle.
 type Evaluator interface {
 	Evaluate(rc *riskcontext.RiskContext) (decision string, sanitiseTargets []string, err error)
+}
+
+// PolicySnapshot is the request-local policy generation used by production
+// pipelines. All of its data is immutable for the lifetime of a run.
+type PolicySnapshot interface {
+	Evaluator
+	WeightSource
+	SignalCategorySource
+	Thresholds() config.ThresholdConfig
+	ProvenanceWeight(provenance string) float64
 }
 
 // Options carries optional wiring for Pipeline construction. A nil Evaluator
 // falls back to threshold scoring; nil Tracer/AuditSink install noops so the
 // enforcement path never depends on telemetry being configured.
 type Options struct {
-	Evaluator     Evaluator
-	Tracer        trace.Tracer
-	AuditSink     telemetry.AuditSink
-	PolicyVersion string
+	Evaluator Evaluator
+	// SignalWeights is retained for standalone callers and older embedders.
+	SignalWeights WeightSource
+	// SignalCategories limits audit signal names to policy-approved values.
+	SignalCategories SignalCategorySource
+	Tracer           trace.Tracer
+	AuditSink        telemetry.AuditSink
+	PolicyVersion    string
 }
 
-// Pipeline runs the four enforcement stages in order, then OPA evaluation.
+// Pipeline runs the 4 enforcement stages in order, then OPA evaluation.
 type Pipeline struct {
-	cfg           *config.Config
-	stages        []Stage
-	evaluator     Evaluator // nil → threshold fallback (Phase 2 behaviour)
-	tracer        trace.Tracer
-	audit         telemetry.AuditSink
-	policyVersion string
+	cfg              *config.Config
+	stages           []Stage
+	evaluator        Evaluator // nil → threshold fallback (Phase 2 behaviour)
+	weights          WeightSource
+	signalCategories SignalCategorySource
+	tracer           trace.Tracer
+	audit            telemetry.AuditSink
+	policyVersion    string
 }
 
 // New constructs a Pipeline with no OPA evaluator (threshold fallback only) and
@@ -87,7 +103,7 @@ func New(cfg *config.Config, stages []Stage) *Pipeline {
 	return NewWithOptions(cfg, stages, Options{})
 }
 
-// NewWithEvaluator constructs a Pipeline that calls ev after the four stages to
+// NewWithEvaluator constructs a Pipeline that calls ev after the 4 stages to
 // obtain the final decision from OPA. Falls back to threshold if ev errors.
 func NewWithEvaluator(cfg *config.Config, stages []Stage, ev Evaluator) *Pipeline {
 	return NewWithOptions(cfg, stages, Options{Evaluator: ev})
@@ -104,13 +120,21 @@ func NewWithOptions(cfg *config.Config, stages []Stage, opts Options) *Pipeline 
 	if sink == nil {
 		sink = telemetry.NopSink{}
 	}
+	signalCategories := opts.SignalCategories
+	if signalCategories == nil {
+		if categories, ok := opts.SignalWeights.(SignalCategorySource); ok {
+			signalCategories = categories
+		}
+	}
 	return &Pipeline{
-		cfg:           cfg,
-		stages:        stages,
-		evaluator:     opts.Evaluator,
-		tracer:        tracer,
-		audit:         sink,
-		policyVersion: opts.PolicyVersion,
+		cfg:              cfg,
+		stages:           stages,
+		evaluator:        opts.Evaluator,
+		weights:          opts.SignalWeights,
+		signalCategories: signalCategories,
+		tracer:           tracer,
+		audit:            sink,
+		policyVersion:    opts.PolicyVersion,
 	}
 }
 
@@ -134,11 +158,12 @@ func (p *Pipeline) RunContext(ctx context.Context, rc *riskcontext.RiskContext) 
 
 	var blockedAt string
 	var shortCircuit bool
+	snapshot := p.policySnapshot()
 
 	for _, s := range p.stages {
 		prevSignals := len(rc.Signals)
 		_, stageSpan := p.tracer.Start(runCtx, "stage."+s.Name())
-		hardBlock := s.Run(rc)
+		hardBlock := runStage(s, rc, snapshot)
 		stageSpan.SetAttributes(
 			attribute.Int("signals.added", len(rc.Signals)-prevSignals),
 			attribute.Bool("hard_block", hardBlock),
@@ -167,7 +192,7 @@ func (p *Pipeline) RunContext(ctx context.Context, rc *riskcontext.RiskContext) 
 			BlockedAt: blockedAt,
 		}
 	} else {
-		d, sanitised := p.decide(runCtx, rc)
+		d, sanitised := p.decide(runCtx, rc, snapshot)
 		result = Result{
 			Decision:         d,
 			Score:            rc.Score,
@@ -179,7 +204,7 @@ func (p *Pipeline) RunContext(ctx context.Context, rc *riskcontext.RiskContext) 
 
 	elapsed := time.Since(start)
 	annotateRunSpan(runSpan, result, elapsed)
-	p.emitAudit(runSpan.SpanContext(), rc, result, elapsed)
+	p.emitAudit(runSpan.SpanContext(), rc, result, elapsed, snapshot)
 
 	return result
 }
@@ -188,7 +213,7 @@ func (p *Pipeline) RunContext(ctx context.Context, rc *riskcontext.RiskContext) 
 // evaluator configured it calls OPA inside an "opa.evaluate" span and falls back
 // to threshold scoring if OPA errors. Without an evaluator it uses threshold
 // scoring directly.
-func (p *Pipeline) decide(ctx context.Context, rc *riskcontext.RiskContext) (byte, []byte) {
+func (p *Pipeline) decide(ctx context.Context, rc *riskcontext.RiskContext, snapshot PolicySnapshot) (byte, []byte) {
 	if p.evaluator == nil {
 		return thresholdDecision(rc.Score, p.cfg.Thresholds), nil
 	}
@@ -202,12 +227,16 @@ func (p *Pipeline) decide(ctx context.Context, rc *riskcontext.RiskContext) (byt
 	)
 	defer opaSpan.End()
 
-	opaDecision, targets, err := p.evaluator.Evaluate(rc)
+	evaluator := p.evaluator
+	if snapshot != nil {
+		evaluator = snapshot
+	}
+	opaDecision, targets, err := evaluator.Evaluate(rc)
 	if err != nil {
 		opaSpan.RecordError(err)
 		opaSpan.SetAttributes(attribute.String("opa.outcome", "error_fallback_threshold"))
 		log.Printf("pipeline: OPA evaluation error: %v (falling back to threshold)", err)
-		return thresholdDecision(rc.Score, p.cfg.Thresholds), nil
+		return thresholdDecision(rc.Score, p.thresholds(snapshot)), nil
 	}
 
 	d := decisionByte(opaDecision)
@@ -234,12 +263,19 @@ func annotateRunSpan(span trace.Span, r Result, elapsed time.Duration) {
 	}
 }
 
-func (p *Pipeline) emitAudit(sc trace.SpanContext, rc *riskcontext.RiskContext, r Result, elapsed time.Duration) {
+func (p *Pipeline) emitAudit(sc trace.SpanContext, rc *riskcontext.RiskContext, r Result, elapsed time.Duration, snapshot PolicySnapshot) {
 	entry := telemetry.NewEntry()
 	entry.HookType = rc.HookType
 	entry.Decision = decisionText(r.Decision)
 	entry.Score = r.Score
-	entry.Signals = signalCategories(r.Signals)
+	categorySource := p.signalCategories
+	if snapshot != nil {
+		categorySource = snapshot
+	}
+	entry.Signals = signalCategories(r.Signals, categorySource)
+	if categorySource == nil {
+		entry.Signals = signalCategoriesFromWeights(r.Signals, p.weights)
+	}
 	entry.Provenance = rc.Provenance
 	entry.SessionID = rc.SessionID
 	entry.PolicyVersion = p.policyVersion
@@ -252,13 +288,61 @@ func (p *Pipeline) emitAudit(sc trace.SpanContext, rc *riskcontext.RiskContext, 
 	p.audit.Emit(entry)
 }
 
-// signalCategories pulls the category names out of the signals for the audit
-// log. Raw scores are left out; the audit record carries the aggregate score
-// separately.
-func signalCategories(sigs []riskcontext.Signal) []string {
+type snapshotStage interface {
+	RunWithSnapshot(rc *riskcontext.RiskContext, snapshot PolicySnapshot) (hardBlock bool)
+}
+
+func runStage(stage Stage, rc *riskcontext.RiskContext, snapshot PolicySnapshot) bool {
+	if snapshotStage, ok := stage.(snapshotStage); ok && snapshot != nil {
+		return snapshotStage.RunWithSnapshot(rc, snapshot)
+	}
+	return stage.Run(rc)
+}
+
+func (p *Pipeline) policySnapshot() PolicySnapshot {
+	if p.evaluator == nil {
+		return nil
+	}
+	provider, ok := p.evaluator.(policy.SnapshotProvider)
+	if !ok {
+		return nil
+	}
+	return provider.Snapshot()
+}
+
+func (p *Pipeline) thresholds(snapshot PolicySnapshot) config.ThresholdConfig {
+	if snapshot != nil {
+		return snapshot.Thresholds()
+	}
+	return p.cfg.Thresholds
+}
+
+// signalCategories returns only names from the policy audit allowlist.
+// Inbound signals can contain attacker-controlled text, so unknown categories
+// are not logged.
+func signalCategories(sigs []riskcontext.Signal, source SignalCategorySource) []string {
+	if source == nil {
+		return nil
+	}
 	out := make([]string, 0, len(sigs))
 	for _, s := range sigs {
-		out = append(out, s.Category)
+		if source.SignalCategoryAllowed(s.Category) {
+			out = append(out, s.Category)
+		}
+	}
+	return out
+}
+
+func signalCategoriesFromWeights(sigs []riskcontext.Signal, weights WeightSource) []string {
+	if weights == nil {
+		return nil
+	}
+	allowed := weights.SignalWeights()
+	out := make([]string, 0, len(sigs))
+	for _, s := range sigs {
+		if _, ok := allowed[s.Category]; ok {
+			out = append(out, s.Category)
+		}
 	}
 	return out
 }

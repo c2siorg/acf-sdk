@@ -1,7 +1,7 @@
 // Package policy wraps the OPA Go SDK for policy evaluation, sanitisation
 // execution, and result assembly.
 //
-// engine.go — OPA engine.
+// engine.go: OPA engine.
 // Loads the Rego bundle from the policies directory at startup.
 // Watches for file changes and hot-reloads without restarting.
 // Serves signal_weights from policy_config.yaml to the aggregate stage.
@@ -14,9 +14,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
-	"sync"
+	"sort"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/open-policy-agent/opa/v1/rego"
@@ -24,6 +27,7 @@ import (
 	"github.com/open-policy-agent/opa/v1/storage/inmem"
 	"gopkg.in/yaml.v3"
 
+	"github.com/acf-sdk/sidecar/internal/config"
 	"github.com/acf-sdk/sidecar/pkg/riskcontext"
 )
 
@@ -35,7 +39,7 @@ type OPAResult struct {
 	SanitiseTargets []string
 }
 
-// preparedQueries holds one compiled query per hook type.
+// preparedQueries holds a compiled query per hook type.
 // Swapped atomically on hot reload.
 type preparedQueries struct {
 	onPrompt   rego.PreparedEvalQuery
@@ -44,15 +48,34 @@ type preparedQueries struct {
 	onMemory   rego.PreparedEvalQuery
 }
 
+// Snapshot is 1 immutable, successfully loaded policy generation. Its
+// prepared queries and policy data are never changed after construction.
+type Snapshot struct {
+	queries         *preparedQueries
+	weights         map[string]float64
+	thresholds      config.ThresholdConfig
+	trustWeights    map[string]float64
+	auditCategories map[string]struct{}
+}
+
+// SnapshotProvider exposes the generation that a request should use.
+type SnapshotProvider interface {
+	Snapshot() *Snapshot
+}
+
+type loadedPolicy struct {
+	store           storage.Store
+	weights         map[string]float64
+	thresholds      config.ThresholdConfig
+	trustWeights    map[string]float64
+	auditCategories map[string]struct{}
+}
+
 // Engine is a thread-safe OPA policy evaluator with hot reload support.
 type Engine struct {
-	policyDir string
-	mu        sync.RWMutex
-	queries   *preparedQueries
-	// weights is signal_weights from policy_config.yaml. It is swapped with
-	// queries on reload and never mutated in place.
-	weights map[string]float64
-	stopCh  chan struct{}
+	policyDir  string
+	generation atomic.Pointer[Snapshot]
+	stopCh     chan struct{}
 }
 
 // NewEngine constructs an Engine that loads Rego policies from policyDir.
@@ -70,19 +93,27 @@ func NewEngine(policyDir string) (*Engine, error) {
 	return e, nil
 }
 
-// Evaluate runs the OPA policy for rc.HookType and returns the decision and
-// sanitise_targets declared by Rego. Returns ("ALLOW", nil, nil) if no rule
-// fires. Returns an error if the hook type is unknown or OPA evaluation fails.
+// Snapshot returns the most recent successful policy generation.
+func (e *Engine) Snapshot() *Snapshot {
+	return e.generation.Load()
+}
+
+// Evaluate runs the OPA policy for rc.HookType using 1 policy generation and
+// returns the decision and sanitise_targets declared by Rego. Returns
+// ("ALLOW", nil, nil) if no rule fires. Returns an error if the hook type is
+// unknown or OPA evaluation fails.
 //
 // This method satisfies the pipeline.Evaluator interface:
 //
 //	Evaluate(rc) (decision string, sanitiseTargets []string, err error)
 func (e *Engine) Evaluate(rc *riskcontext.RiskContext) (string, []string, error) {
-	input := buildInput(rc)
+	return e.Snapshot().Evaluate(rc)
+}
 
-	e.mu.RLock()
-	q := e.queries
-	e.mu.RUnlock()
+// Evaluate runs the OPA policy using this immutable policy generation.
+func (s *Snapshot) Evaluate(rc *riskcontext.RiskContext) (string, []string, error) {
+	input := buildInput(rc)
+	q := s.queries
 
 	ctx := context.Background()
 
@@ -110,6 +141,10 @@ func (e *Engine) Evaluate(rc *riskcontext.RiskContext) (string, []string, error)
 	return result.Decision, result.SanitiseTargets, nil
 }
 
+// Snapshot returns itself so a snapshot can be used wherever a provider is
+// accepted by the pipeline.
+func (s *Snapshot) Snapshot() *Snapshot { return s }
+
 // Stop shuts down the hot-reload goroutine.
 func (e *Engine) Stop() {
 	select {
@@ -119,21 +154,70 @@ func (e *Engine) Stop() {
 	}
 }
 
-// SignalWeights returns the signal weights from the most recent successful
-// load of policy_config.yaml, and satisfies pipeline.WeightSource. The map is
-// replaced wholesale on reload, so callers must not mutate it.
-func (e *Engine) SignalWeights() map[string]float64 {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.weights
+// Reload synchronously loads and activates a new policy generation. A failed
+// reload leaves the current generation active.
+func (e *Engine) Reload() error {
+	return e.reload()
 }
 
-// reload compiles all Rego policies and atomically swaps the prepared queries.
+// SignalWeights returns a copy of the signal weights from this policy
+// generation. The snapshot keeps its internal map private and immutable.
+func (s *Snapshot) SignalWeights() map[string]float64 {
+	return cloneWeights(s.weights)
+}
+
+// SignalWeights returns a copy of the signal weights from the most recent
+// successful load of policy_config.yaml.
+func (e *Engine) SignalWeights() map[string]float64 {
+	return e.Snapshot().SignalWeights()
+}
+
+// SignalCategoryAllowed reports whether category is approved for audit output
+// by this policy generation.
+func (s *Snapshot) SignalCategoryAllowed(category string) bool {
+	_, ok := s.auditCategories[category]
+	return ok
+}
+
+// SignalCategoryAllowed reports whether category is approved for audit output
+// by the most recent successful policy generation.
+func (e *Engine) SignalCategoryAllowed(category string) bool {
+	return e.Snapshot().SignalCategoryAllowed(category)
+}
+
+// Thresholds returns the score thresholds bound to this policy generation.
+func (s *Snapshot) Thresholds() config.ThresholdConfig {
+	return s.thresholds
+}
+
+// Thresholds returns the score thresholds from the most recent successful
+// policy generation.
+func (e *Engine) Thresholds() config.ThresholdConfig {
+	return e.Snapshot().Thresholds()
+}
+
+// ProvenanceWeight returns the trust multiplier bound to this policy
+// generation, defaulting to 1.0 for an unknown provenance label.
+func (s *Snapshot) ProvenanceWeight(provenance string) float64 {
+	if weight, ok := s.trustWeights[provenance]; ok {
+		return weight
+	}
+	return 1.0
+}
+
+// ProvenanceWeight returns the trust multiplier from the most recent
+// successful policy generation.
+func (e *Engine) ProvenanceWeight(provenance string) float64 {
+	return e.Snapshot().ProvenanceWeight(provenance)
+}
+
+// reload compiles all Rego policies and atomically swaps the complete policy
+// generation only after every component has loaded successfully.
 func (e *Engine) reload() error {
 	ctx := context.Background()
 
 	// 1. Load data.config and the signal weights from policy_config.yaml.
-	store, weights, err := loadPolicyData(e.policyDir)
+	loaded, err := loadPolicyGeneration(e.policyDir)
 	if err != nil {
 		return err
 	}
@@ -149,7 +233,8 @@ func (e *Engine) reload() error {
 
 	// 3. Compile a PreparedEvalQuery for each hook type.
 	compile := func(pkg string) (rego.PreparedEvalQuery, error) {
-		opts := append(modules, rego.Query("data."+pkg), rego.Store(store))
+		opts := append([]func(*rego.Rego){}, modules...)
+		opts = append(opts, rego.Query("data."+pkg), rego.Store(loaded.store))
 		return rego.New(opts...).PrepareForEval(ctx)
 	}
 
@@ -170,23 +255,27 @@ func (e *Engine) reload() error {
 		return fmt.Errorf("policy.Engine: compile memory: %w", err)
 	}
 
-	// 4. Atomically swap in the new compiled queries and weights, under one
-	// lock so the engine never holds queries and weights from different loads.
-	e.mu.Lock()
-	e.queries = &preparedQueries{
-		onPrompt:   onPrompt,
-		onContext:  onContext,
-		onToolCall: onToolCall,
-		onMemory:   onMemory,
-	}
-	e.weights = weights
-	e.mu.Unlock()
+	// 4. Atomically swap 1 immutable generation so an in-flight request can
+	// retain its old queries, weights, thresholds, trust weights, and audit
+	// categories after a reload.
+	e.generation.Store(&Snapshot{
+		queries: &preparedQueries{
+			onPrompt:   onPrompt,
+			onContext:  onContext,
+			onToolCall: onToolCall,
+			onMemory:   onMemory,
+		},
+		weights:         loaded.weights,
+		thresholds:      loaded.thresholds,
+		trustWeights:    loaded.trustWeights,
+		auditCategories: loaded.auditCategories,
+	})
 
 	return nil
 }
 
 // watchLoop polls the policy directory every 5 seconds and reloads on change.
-// Uses modification-time comparison — no fsnotify dependency (Windows safe).
+// Uses modification-time comparison; no fsnotify dependency (Windows safe).
 func (e *Engine) watchLoop() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -226,34 +315,165 @@ func (e *Engine) latestMod() time.Time {
 	return latest
 }
 
-// loadPolicyData reads policy_config.yaml, builds an OPA in-memory store with
-// the parsed config available as data.config inside Rego rules, and extracts
-// signal_weights for the aggregate stage.
+// loadPolicyData reads policy_config.yaml and prepares all policy-generation
+// data. Weighted categories are always included in the audit allowlist.
 //
 // The file is required. Without it there are no signal weights: every signal
 // would score 0.0 and every request would be ALLOWed. So a missing or
-// weightless policy_config.yaml fails the load instead of failing open — at
+// weightless policy_config.yaml fails the load instead of failing open. At
 // startup the sidecar refuses to run, and on hot reload the previous policies
 // stay live.
-func loadPolicyData(policyDir string) (storage.Store, map[string]float64, error) {
+func loadPolicyGeneration(policyDir string) (*loadedPolicy, error) {
 	configPath := filepath.Join(policyDir, "data", "policy_config.yaml")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("policy.Engine: cannot read %s: %w", configPath, err)
+		return nil, fmt.Errorf("policy.Engine: cannot read %s: %w", configPath, err)
 	}
 
 	var parsed map[string]any
 	if err := yaml.Unmarshal(data, &parsed); err != nil {
-		return nil, nil, fmt.Errorf("policy.Engine: cannot parse policy_config.yaml: %w", err)
+		return nil, fmt.Errorf("policy.Engine: cannot parse policy_config.yaml: %w", err)
 	}
 
 	weights, err := parseSignalWeights(parsed["signal_weights"])
 	if err != nil {
-		return nil, nil, fmt.Errorf("policy.Engine: %s: %w", configPath, err)
+		return nil, fmt.Errorf("policy.Engine: %s: %w", configPath, err)
+	}
+	if err := validateSignalWeightCoverage(policyDir, weights); err != nil {
+		return nil, fmt.Errorf("policy.Engine: %s: %w", configPath, err)
+	}
+	thresholds, err := parsePolicyThresholds(parsed)
+	if err != nil {
+		return nil, fmt.Errorf("policy.Engine: %s: %w", configPath, err)
+	}
+	trustWeights, err := parsePolicyTrustWeights(parsed)
+	if err != nil {
+		return nil, fmt.Errorf("policy.Engine: %s: %w", configPath, err)
+	}
+	auditCategories := weightedAuditCategories(weights)
+	if raw, ok := parsed["audit_signal_categories"]; ok {
+		auditCategories, err = parseAuditSignalCategories(raw, weights)
+		if err != nil {
+			return nil, fmt.Errorf("policy.Engine: %s: %w", configPath, err)
+		}
 	}
 
 	store := inmem.NewFromObject(map[string]any{"config": parsed})
-	return store, weights, nil
+	return &loadedPolicy{
+		store:           store,
+		weights:         weights,
+		thresholds:      thresholds,
+		trustWeights:    trustWeights,
+		auditCategories: auditCategories,
+	}, nil
+}
+
+// loadPolicyData preserves the data-loading helper used by older package
+// tests and embedders while the engine itself consumes the complete snapshot
+// data above.
+func loadPolicyData(policyDir string) (storage.Store, map[string]float64, map[string]struct{}, error) {
+	loaded, err := loadPolicyGeneration(policyDir)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return loaded.store, loaded.weights, loaded.auditCategories, nil
+}
+
+var sidecarSignalCategories = []string{
+	"hmac_invalid",
+	"validate:invalid_hook_type",
+	"validate:missing_provenance",
+	"validate:nil_payload",
+	"jailbreak_pattern",
+	"tool:not_allowed",
+	"shell_metacharacter",
+	"path_traversal",
+	"memory:key_not_allowed",
+}
+
+// These are the canonical categories emitted by the Python semantic scanner's
+// hardcoded contract. Categories loaded from the shared lexical library are
+// added below, so a policy update cannot silently disable either detector.
+var pythonSemanticSignalCategories = []string{
+	"instruction_override",
+	"context_manipulation",
+	"data_exfiltration",
+	"tool_boundary_violation",
+	"role_escalation",
+	"encoding_bypass",
+}
+
+func validateSignalWeightCoverage(policyDir string, weights map[string]float64) error {
+	required, err := requiredSignalCategories(policyDir)
+	if err != nil {
+		return err
+	}
+
+	var missing []string
+	for category := range required {
+		if _, ok := weights[category]; !ok {
+			missing = append(missing, category)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	return fmt.Errorf("signal_weights is missing categories: %s", strings.Join(missing, ", "))
+}
+
+func requiredSignalCategories(policyDir string) (map[string]struct{}, error) {
+	required := make(map[string]struct{}, len(sidecarSignalCategories)+len(pythonSemanticSignalCategories))
+	for _, category := range sidecarSignalCategories {
+		required[category] = struct{}{}
+	}
+	for _, category := range pythonSemanticSignalCategories {
+		required[category] = struct{}{}
+	}
+
+	patterns, err := config.LoadPatterns(policyDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return required, nil
+		}
+		return nil, fmt.Errorf("cannot load lexical signal categories: %w", err)
+	}
+	for _, entry := range patterns.Entries {
+		category := entry.Category
+		if category == "" {
+			category = "jailbreak_pattern"
+		}
+		required[category] = struct{}{}
+	}
+	return required, nil
+}
+
+func weightedAuditCategories(weights map[string]float64) map[string]struct{} {
+	categories := make(map[string]struct{}, len(weights))
+	for category := range weights {
+		categories[category] = struct{}{}
+	}
+	return categories
+}
+
+func parseAuditSignalCategories(raw any, weights map[string]float64) (map[string]struct{}, error) {
+	if raw == nil {
+		return nil, errors.New("audit_signal_categories must be a list")
+	}
+
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, errors.New("audit_signal_categories must be a list")
+	}
+	categories := weightedAuditCategories(weights)
+	for i, item := range items {
+		category, ok := item.(string)
+		if !ok || strings.TrimSpace(category) == "" {
+			return nil, fmt.Errorf("audit_signal_categories[%d] must be a non-empty string", i)
+		}
+		categories[category] = struct{}{}
+	}
+	return categories, nil
 }
 
 // parseSignalWeights validates the signal_weights table: a non-empty map from
@@ -265,13 +485,11 @@ func parseSignalWeights(raw any) (map[string]float64, error) {
 	}
 	weights := make(map[string]float64, len(table))
 	for category, v := range table {
-		var w float64
-		switch n := v.(type) {
-		case float64:
-			w = n
-		case int:
-			w = float64(n)
-		default:
+		if strings.TrimSpace(category) == "" {
+			return nil, errors.New("signal_weights contains a blank category name")
+		}
+		w, ok := finiteNumber(v)
+		if !ok {
 			return nil, fmt.Errorf("signal_weights.%s: %v is not a number", category, v)
 		}
 		if w < 0 || w > 1 {
@@ -280,6 +498,91 @@ func parseSignalWeights(raw any) (map[string]float64, error) {
 		weights[category] = w
 	}
 	return weights, nil
+}
+
+func parsePolicyThresholds(parsed map[string]any) (config.ThresholdConfig, error) {
+	thresholds := config.ThresholdConfig{BlockScore: 0.85, SanitiseScore: 0.50}
+	raw, ok := parsed["thresholds"]
+	if !ok {
+		return thresholds, nil
+	}
+	table, ok := raw.(map[string]any)
+	if !ok || table == nil {
+		return thresholds, errors.New("thresholds must be a map")
+	}
+	if value, exists := table["block_score"]; exists {
+		parsedValue, ok := finiteNumber(value)
+		if !ok || parsedValue < 0 || parsedValue > 1 {
+			return thresholds, errors.New("thresholds.block_score must be finite and between 0.0 and 1.0")
+		}
+		thresholds.BlockScore = parsedValue
+	}
+	if value, exists := table["sanitise_score"]; exists {
+		parsedValue, ok := finiteNumber(value)
+		if !ok || parsedValue < 0 || parsedValue > 1 {
+			return thresholds, errors.New("thresholds.sanitise_score must be finite and between 0.0 and 1.0")
+		}
+		thresholds.SanitiseScore = parsedValue
+	}
+	if thresholds.SanitiseScore > thresholds.BlockScore {
+		return thresholds, errors.New("thresholds.sanitise_score must be <= thresholds.block_score")
+	}
+	return thresholds, nil
+}
+
+func parsePolicyTrustWeights(parsed map[string]any) (map[string]float64, error) {
+	raw, ok := parsed["trust_weights"]
+	if !ok {
+		return map[string]float64{}, nil
+	}
+	table, ok := raw.(map[string]any)
+	if !ok || table == nil {
+		return nil, errors.New("trust_weights must be a map")
+	}
+	weights := make(map[string]float64, len(table))
+	for provenance, value := range table {
+		if strings.TrimSpace(provenance) == "" {
+			return nil, errors.New("trust_weights contains a blank provenance name")
+		}
+		weight, ok := finiteNumber(value)
+		if !ok || weight < 0 || weight > 1 {
+			return nil, fmt.Errorf("trust_weights.%s must be finite and between 0.0 and 1.0", provenance)
+		}
+		weights[provenance] = weight
+	}
+	return weights, nil
+}
+
+func finiteNumber(value any) (float64, bool) {
+	var number float64
+	switch n := value.(type) {
+	case float64:
+		number = n
+	case float32:
+		number = float64(n)
+	case int:
+		number = float64(n)
+	case int64:
+		number = float64(n)
+	case uint:
+		number = float64(n)
+	case uint64:
+		number = float64(n)
+	default:
+		return 0, false
+	}
+	if math.IsNaN(number) || math.IsInf(number, 0) {
+		return 0, false
+	}
+	return number, true
+}
+
+func cloneWeights(weights map[string]float64) map[string]float64 {
+	clone := make(map[string]float64, len(weights))
+	for category, weight := range weights {
+		clone[category] = weight
+	}
+	return clone
 }
 
 // loadModules reads all .rego files (excluding _test.rego) from policyDir
@@ -299,7 +602,7 @@ func loadModules(policyDir string) ([]func(*rego.Rego), error) {
 		if filepath.Ext(name) != ".rego" {
 			continue
 		}
-		// Skip test files — they define test rules that conflict with evaluation.
+		// Skip test files: they define test rules that conflict with evaluation.
 		if len(name) > 9 && name[len(name)-9:] == "_test.rego" {
 			continue
 		}

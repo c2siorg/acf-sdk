@@ -62,26 +62,34 @@ decision := "BLOCK" if {
 
 # High injection score → BLOCK
 decision := "BLOCK" if {
-    input.score >= 0.8
+    input.score >= _block_score
     not _has_hard_block
 }
 
 # Medium injection score → SANITISE
 decision := "SANITISE" if {
-    input.score >= 0.4
-    input.score < 0.8
+    input.score >= _sanitise_score
+    input.score < _block_score
     not _has_hard_block
 }
 
 sanitise_targets contains "prompt_text" if {
-    input.score >= 0.4
-    input.score < 0.8
+    input.score >= _sanitise_score
+    input.score < _block_score
     not _has_hard_block
 }
 
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
+
+_block_score := data.config.thresholds.block_score if {
+    data.config.thresholds.block_score
+} else := 0.85
+
+_sanitise_score := data.config.thresholds.sanitise_score if {
+    data.config.thresholds.sanitise_score
+} else := 0.50
 
 _has_hard_block if {
     some sig in input.signals

@@ -126,10 +126,10 @@ func (l *Listener) Stop() {
 }
 
 // Drain blocks until the accept loop has exited AND every in-flight handler
-// has returned, or until ctx is done. Waiting on Serve first closes the gap
-// where a connection accepted after Stop could still register a handler
-// after handlers.Wait() has returned. Safe to call after Stop. Returns
-// ctx.Err() if the deadline hits first.
+// has returned, or until ctx is done. Waiting on Serve before handlers closes
+// the gap where a connection accepted after Stop could still register a handler
+// after handlers.Wait() has returned. Safe to call after Stop. Returns ctx.Err()
+// if the deadline expires before completion.
 func (l *Listener) Drain(ctx context.Context) error {
 	select {
 	case <-l.serveDone:
@@ -216,8 +216,8 @@ func (l *Listener) handleConn(conn net.Conn) {
 		}
 		result := l.cfg.Pipeline.Run(&rc)
 		decision = result.Decision
-		log.Printf("transport: session=%s hook=%s score=%.2f signals=%v decision=%d blocked_at=%s",
-			rc.SessionID, rc.HookType, result.Score, result.Signals, decision, result.BlockedAt)
+		log.Printf("transport: pipeline decision=%d score=%.2f signal_count=%d",
+			decision, result.Score, len(result.Signals))
 
 		// 5. Write response (include sanitised payload if decision == SANITISE).
 		resp := EncodeResponse(&ResponseFrame{
