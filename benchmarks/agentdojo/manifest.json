@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "note": "Scoped to benchmarks/agentdojo/ only. Deliberately separate from ../manifest.json, which is owned by the InjecAgent/PINT runner's own re-pin workflow.",
+  "agentdojo": {
+    "repository": "https://github.com/ethz-spylab/agentdojo",
+    "pypi_package": "agentdojo",
+    "pypi_version": "0.1.35",
+    "license": "MIT",
+    "license_url": "https://github.com/ethz-spylab/agentdojo/blob/main/LICENSE",
+    "default_benchmark_version": "v1.2.2",
+    "task_suites": ["banking", "slack", "travel", "workspace"],
+    "attacks": [
+      "captcha_dos",
+      "direct",
+      "dos",
+      "felony_dos",
+      "ignore_previous",
+      "important_instructions",
+      "important_instructions_no_model_name",
+      "important_instructions_no_names",
+      "important_instructions_no_user_name",
+      "important_instructions_wrong_model_name",
+      "important_instructions_wrong_user_name",
+      "injecagent",
+      "manual",
+      "offensive_email_dos",
+      "swearwords_dos",
+      "system_message",
+      "tool_knowledge"
+    ],
+    "verified_against_installed_package_on": "2026-09-13",
+    "verification_note": "Suite names, attack names, and every class/function signature this scaffold calls were confirmed by installing agentdojo==0.1.35 in a clean venv and inspecting the real source (inspect.getsource / inspect.signature), not taken from documentation alone."
+  }
+}
