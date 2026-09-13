@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "benchmark": "injecagent",
+  "repository": "uiuc-kang-lab/InjecAgent",
+  "commit": "f19c9f2c79a41046eb13c03c51a24c567a8ffa07",
+  "license": "MIT",
+  "files": {
+    "licence": {
+      "path": "LICENCE",
+      "sha256": "b48589499dbb84caa796b00b4ea652b0443e49660282c44d890fd473b8c0674e"
+    },
+    "test_cases_dh_base": {
+      "path": "data/test_cases_dh_base.json",
+      "sha256": "0a8186468d21389af432e8c7b399ae42264d1b93a07b65c7a489468508604305",
+      "cases": 510
+    },
+    "test_cases_ds_base": {
+      "path": "data/test_cases_ds_base.json",
+      "sha256": "4daab35c62a3845e8b9400f4dca58b9c9f37e57cd33b2337552557fbb26282e9",
+      "cases": 544
+    },
+    "test_cases_dh_enhanced": {
+      "path": "data/test_cases_dh_enhanced.json",
+      "sha256": "885602716b72c18af80695ce6c2e1f242fa03163bc90b0788b0c5e4ab6216d50",
+      "cases": 510
+    },
+    "test_cases_ds_enhanced": {
+      "path": "data/test_cases_ds_enhanced.json",
+      "sha256": "7bc510868df032511053fc40e8470e68a041fb7148d055112093594bf73ab0ce",
+      "cases": 544
+    },
+    "tools": {
+      "path": "data/tools.json",
+      "sha256": "e21a8f70b1d5de4677d6d52642936a322655d79b17a72c84f600550384083a1e"
+    },
+    "simulated_responses": {
+      "path": "data/attacker_simulated_responses.json",
+      "sha256": "b1da2e1fb75f266c069b832fef6738c295f01d8962fae15bdac9ff6625e5594e"
+    },
+    "agent_prompts": {
+      "path": "src/prompts/agent_prompts.py",
+      "sha256": "f0249e434c46a9944dab9797edee4cd41e4fc6fceb48b8b8004585a7a4866037"
+    },
+    "generation_prompts": {
+      "path": "src/prompts/generation_prompts.py",
+      "sha256": "912d3f77008f3798f832f86df08a4a0fe93ad5be35358f44b379e33a255474f3"
+    },
+    "output_parsing": {
+      "path": "src/output_parsing.py",
+      "sha256": "b841348cdbc5b87c781bed4a592d375d02d51769ac2435cf2e7e69c08a03937b",
+      "note": "Reference for the vendored copy in injecagent_parsing.py; the runner never executes it"
+    }
+  }
+}
