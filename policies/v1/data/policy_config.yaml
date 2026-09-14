@@ -1,6 +1,6 @@
-# policy_config.yaml — thresholds, allowlists, trust weights, and signal weights.
+# policy_config.yaml: thresholds, allowlists, trust weights, and signal weights.
 # Loaded into Rego as data.config. signal_weights is also the table the
-# sidecar's aggregate stage scores signals with — the only one; sidecar.yaml
+# sidecar's aggregate stage scores signals with. It is the only table; sidecar.yaml
 # no longer carries it. Every category the sidecar or the SDK scanner can emit
 # must appear there, or it scores 0.0 and cannot change a verdict; the
 # signal-weight contract tests (Go and Python) enforce this.
@@ -11,10 +11,13 @@ thresholds:
   sanitise_score: 0.50   # risk score >= this → SANITISE
 
 trust_weights:
-  user_input: 1.0        # highest — direct prompt injection risk
+  user_input: 1.0        # highest: direct prompt injection risk
+  user: 1.0
   tool_output: 0.8
   rag_chunk: 0.7
+  rag: 0.7
   memory_read: 0.6
+  memory: 0.6
 
 tool_allowlist:          # tools permitted by allowlist gate; empty = block all; omit key = allow all
   - search
@@ -53,7 +56,7 @@ signal_weights:          # per-signal contribution to risk score
   # tool / boundary
   tool:not_allowed: 0.9
   tool_boundary_violation: 0.8
-  shell_metacharacter: 0.75   # was shell_metachar — aligned with tool.rego category name
+  shell_metacharacter: 0.75   # was shell_metachar; aligned with tool.rego category name
   path_traversal: 0.75
 
   # multi-turn
@@ -70,3 +73,13 @@ signal_weights:          # per-signal contribution to risk score
 
   # low-confidence structural signals
   structural_anomaly: 0.40
+
+# Unweighted signal categories used by Rego and approved for audit output.
+# Weighted categories are approved automatically.
+audit_signal_categories:
+  - content_scan
+  - low_trust_source
+  - obfuscation_escalation
+  - parameter_injection
+  - policy_integrity
+  - source_trust

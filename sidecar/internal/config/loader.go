@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -52,6 +53,41 @@ type Config struct {
 	// where the policy engine hot-reloads them; a table here is ignored and
 	// main logs a warning, so a local override is never dropped silently.
 	DeprecatedSignalWeights map[string]float64 `yaml:"signal_weights"`
+
+	// Telemetry controls OpenTelemetry tracing and the structured audit log.
+	// An empty endpoint disables spans. An empty audit path writes to stdout.
+	Telemetry TelemetryConfig `yaml:"telemetry"`
+}
+
+// TelemetryConfig controls span emission and audit log output.
+type TelemetryConfig struct {
+	// OTelEndpoint is the OTLP HTTP collector URL. Accepts host:port or a
+	// full URL. URL schemes do not override Insecure. Empty disables span
+	// emission.
+	OTelEndpoint string `yaml:"otel_endpoint"`
+
+	// ServiceName is stamped on every span as service.name. Defaults to
+	// acf-sidecar when empty.
+	ServiceName string `yaml:"service_name"`
+
+	// SampleRatio is the head-based sampling ratio in [0, 1]. A value of 0
+	// is honoured and disables span emission entirely.
+	SampleRatio float64 `yaml:"sample_ratio"`
+
+	// Insecure permits plaintext OTLP HTTP. Leave false for TLS collectors.
+	Insecure bool `yaml:"insecure"`
+
+	// AuditPath is the file path for the JSON audit log. Empty sends audit
+	// lines to stdout. "-" also means stdout. Parent directories are created
+	// on startup.
+	AuditPath string `yaml:"audit_path"`
+
+	// AuditBuffer is the size of the async audit channel. Defaults to 1024.
+	AuditBuffer int `yaml:"audit_buffer"`
+
+	// PolicyVersion is stamped on every audit entry. Surfaces which policy
+	// bundle produced a given decision.
+	PolicyVersion string `yaml:"policy_version"`
 }
 
 // PipelineConfig controls pipeline execution behaviour.
@@ -89,7 +125,13 @@ func Load(path string) (*Config, error) {
 
 	// Resolve relative paths from the config file location so the runtime
 	// behaves the same regardless of the process working directory.
-	cfg.PolicyDir = resolveRelative(filepath.Dir(path), cfg.PolicyDir)
+	configDir := filepath.Dir(path)
+	cfg.PolicyDir = resolveRelative(configDir, cfg.PolicyDir)
+	auditPath, err := resolveAuditPath(configDir, cfg.Telemetry.AuditPath)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Telemetry.AuditPath = auditPath
 
 	return cfg, nil
 }
@@ -176,18 +218,34 @@ func defaults() *Config {
 		},
 		ToolAllowlist:      []string{},
 		MemoryKeyAllowlist: []string{},
+		Telemetry: TelemetryConfig{
+			SampleRatio:   1.0,
+			AuditBuffer:   1024,
+			PolicyVersion: "",
+		},
 	}
 }
 
 func validate(c *Config) error {
-	if c.Thresholds.BlockScore < 0 || c.Thresholds.BlockScore > 1 {
+	if math.IsNaN(c.Thresholds.BlockScore) || math.IsInf(c.Thresholds.BlockScore, 0) ||
+		c.Thresholds.BlockScore < 0 || c.Thresholds.BlockScore > 1 {
 		return errors.New("thresholds.block_score must be between 0.0 and 1.0")
 	}
-	if c.Thresholds.SanitiseScore < 0 || c.Thresholds.SanitiseScore > 1 {
+	if math.IsNaN(c.Thresholds.SanitiseScore) || math.IsInf(c.Thresholds.SanitiseScore, 0) ||
+		c.Thresholds.SanitiseScore < 0 || c.Thresholds.SanitiseScore > 1 {
 		return errors.New("thresholds.sanitise_score must be between 0.0 and 1.0")
 	}
 	if c.Thresholds.SanitiseScore > c.Thresholds.BlockScore {
 		return errors.New("thresholds.sanitise_score must be <= thresholds.block_score")
+	}
+	if math.IsNaN(c.Telemetry.SampleRatio) || math.IsInf(c.Telemetry.SampleRatio, 0) ||
+		c.Telemetry.SampleRatio < 0 || c.Telemetry.SampleRatio > 1 {
+		return errors.New("telemetry.sample_ratio must be finite and between 0.0 and 1.0")
+	}
+	for provenance, weight := range c.TrustWeights {
+		if math.IsNaN(weight) || math.IsInf(weight, 0) || weight < 0 || weight > 1 {
+			return fmt.Errorf("trust_weights.%s must be finite and between 0.0 and 1.0", provenance)
+		}
 	}
 	return nil
 }
@@ -349,4 +407,19 @@ func resolveRelative(baseDir, path string) string {
 		return filepath.Clean(path)
 	}
 	return filepath.Clean(filepath.Join(baseDir, path))
+}
+
+func resolveAuditPath(baseDir, path string) (string, error) {
+	if path == "" || path == "-" {
+		return path, nil
+	}
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path), nil
+	}
+
+	canonicalBaseDir, err := filepath.EvalSymlinks(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("config: cannot canonicalize config directory %s for audit path: %w", baseDir, err)
+	}
+	return filepath.Clean(filepath.Join(canonicalBaseDir, path)), nil
 }

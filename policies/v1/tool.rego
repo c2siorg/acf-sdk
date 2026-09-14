@@ -30,7 +30,7 @@ decision := "ALLOW" if {
     _tool_is_permitted
     _destination_is_permitted
     not _has_detection_signal
-    input.score < 0.4
+    input.score < _sanitise_score
 }
 
 # ---------------------------------------------------------------------
@@ -42,16 +42,16 @@ decision := "SANITISE" if {
     _tool_is_permitted
     _destination_is_permitted
     not _has_detection_signal
-    input.score >= 0.4
-    input.score < 0.8
+    input.score >= _sanitise_score
+    input.score < _block_score
 }
 
 sanitise_targets contains "tool_params" if {
     _tool_is_permitted
     _destination_is_permitted
     not _has_detection_signal
-    input.score >= 0.4
-    input.score < 0.8
+    input.score >= _sanitise_score
+    input.score < _block_score
 }
 
 # ---------------------------------------------------------------------
@@ -60,12 +60,20 @@ sanitise_targets contains "tool_params" if {
 # - Destination not on allowlist
 # - Detection signal fired (parameter_injection, shell_metacharacter,
 #   path_traversal)
-# - Containment score >= 0.8
+# - Containment score reaches the configured block threshold
 # ---------------------------------------------------------------------
 
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
+
+_block_score := data.config.thresholds.block_score if {
+    data.config.thresholds.block_score
+} else := 0.85
+
+_sanitise_score := data.config.thresholds.sanitise_score if {
+    data.config.thresholds.sanitise_score
+} else := 0.50
 
 # Tool allowlist: tool must be listed, or no allowlist is configured
 _tool_is_permitted if {

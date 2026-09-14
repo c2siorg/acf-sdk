@@ -1,9 +1,11 @@
-// main.go — sidecar entrypoint.
+// main.go: sidecar entrypoint.
 // Phase 2: loads config, builds the enforcement pipeline, and starts the
 // IPC listener (UDS on Linux/macOS, named pipe on Windows).
 package main
 
 import (
+	"context"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -17,6 +19,7 @@ import (
 	"github.com/acf-sdk/sidecar/internal/crypto"
 	"github.com/acf-sdk/sidecar/internal/pipeline"
 	"github.com/acf-sdk/sidecar/internal/policy"
+	"github.com/acf-sdk/sidecar/internal/telemetry"
 	"github.com/acf-sdk/sidecar/internal/transport"
 )
 
@@ -52,7 +55,7 @@ func main() {
 	// 4. Load jailbreak patterns.
 	patterns, err := config.LoadPatterns(cfg.PolicyDir)
 	if err != nil {
-		log.Printf("sidecar: warning — could not load jailbreak patterns: %v (scan stage will run with no patterns)", err)
+		log.Printf("sidecar: warning - could not load jailbreak patterns: %v (scan stage will run with no patterns)", err)
 		patterns = &config.Patterns{}
 	}
 
@@ -69,7 +72,7 @@ func main() {
 	// Signal weights live in policy_config.yaml. A table left in sidecar.yaml
 	// is ignored, so say so rather than dropping a local override silently.
 	if n := len(cfg.DeprecatedSignalWeights); n > 0 {
-		log.Printf("sidecar: warning — signal_weights in %s is ignored (%d entries); "+
+		log.Printf("sidecar: warning - signal_weights in %s is ignored (%d entries); "+
 			"weights are read from %s", configPath, n,
 			filepath.Join(cfg.PolicyDir, "data", "policy_config.yaml"))
 	}
@@ -77,25 +80,59 @@ func main() {
 	// A pattern category with no weight scores 0.0, so a match in it can never
 	// change a verdict. Surface that once at startup, not per request.
 	if missing := unweightedCategories(patterns.Entries, eng.SignalWeights()); len(missing) > 0 {
-		log.Printf("sidecar: warning — %d jailbreak pattern categories have no signal weight "+
+		log.Printf("sidecar: warning - %d jailbreak pattern categories have no signal weight "+
 			"and will score 0.0: %s", len(missing), strings.Join(missing, ", "))
 	}
 
-	// 6. Build the enforcement pipeline.
-	pl := pipeline.NewWithEvaluator(cfg, []pipeline.Stage{
+	// 6. Wire telemetry. An empty OTel endpoint installs a noop tracer. The audit
+	// sink defaults to stdout so the audit trail is on by default; if its path
+	// cannot be opened we fall back to a noop instead of exiting, so telemetry
+	// never blocks or crashes enforcement.
+	tracer, shutdownTracer, err := telemetry.Init(context.Background(), &telemetry.OTelConfig{
+		Endpoint:    cfg.Telemetry.OTelEndpoint,
+		ServiceName: cfg.Telemetry.ServiceName,
+		SampleRatio: cfg.Telemetry.SampleRatio,
+		Insecure:    cfg.Telemetry.Insecure,
+	})
+	if err != nil {
+		log.Printf("sidecar: telemetry init: %v (using noop tracer)", err)
+	}
+
+	var audit telemetry.AuditSink = telemetry.NopSink{}
+	var closeAuditFile func() error
+	auditWriter, closeFile, auditErr := openAuditWriter(cfg.Telemetry.AuditPath)
+	if auditErr != nil {
+		log.Printf("sidecar: cannot open audit sink: %v (audit logging disabled)", auditErr)
+	} else {
+		closeAuditFile = closeFile
+		buffer := cfg.Telemetry.AuditBuffer
+		if buffer <= 0 {
+			buffer = 1024
+		}
+		audit = telemetry.NewAsyncSink(auditWriter, buffer)
+	}
+
+	// 7. Build the enforcement pipeline.
+	pl := pipeline.NewWithOptions(cfg, []pipeline.Stage{
 		pipeline.NewValidateStage(),
 		pipeline.NewNormaliseStage(),
 		pipeline.NewScanStage(cfg, patterns.Entries),
 		pipeline.NewAggregateStage(cfg, eng),
-	}, eng)
+	}, pipeline.Options{
+		Evaluator:        eng,
+		SignalCategories: eng,
+		Tracer:           tracer,
+		AuditSink:        audit,
+		PolicyVersion:    cfg.Telemetry.PolicyVersion,
+	})
 
 	mode := "strict"
 	if !cfg.Pipeline.StrictMode {
 		mode = "non-strict"
 	}
-	log.Printf("sidecar: pipeline ready (mode=%s, block_threshold=%.2f)", mode, cfg.Thresholds.BlockScore)
+	log.Printf("sidecar: pipeline ready (mode=%s, block_threshold=%.2f)", mode, eng.Thresholds().BlockScore)
 
-	// 7. Resolve IPC address (platform-specific default if unset).
+	// 8. Resolve IPC address (platform-specific default if unset).
 	connector := transport.DefaultConnector()
 	address := connector.DefaultAddress()
 	if p := os.Getenv("ACF_SOCKET_PATH"); p != "" {
@@ -104,13 +141,15 @@ func main() {
 		address = cfg.SocketPath
 	}
 
-	// 8. Create and start listener.
+	// 9. Create and start listener.
 	ln, err := transport.NewListener(transport.Config{
-		Address:    address,
-		Connector:  connector,
-		Signer:     signer,
-		NonceStore: nonceStore,
-		Pipeline:   pl,
+		Address:       address,
+		Connector:     connector,
+		Signer:        signer,
+		NonceStore:    nonceStore,
+		Pipeline:      pl,
+		AuditSink:     audit,
+		PolicyVersion: cfg.Telemetry.PolicyVersion,
 	})
 	if err != nil {
 		log.Fatalf("sidecar: failed to create listener on %s: %v", address, err)
@@ -118,7 +157,7 @@ func main() {
 
 	log.Printf("sidecar: listening on %s", address)
 
-	// 8. Serve in background; block on shutdown signal.
+	// 10. Serve in background; block on shutdown signal.
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- ln.Serve() }()
 
@@ -134,6 +173,71 @@ func main() {
 			log.Fatalf("sidecar: listener error: %v", err)
 		}
 	}
+
+	// 11. Drain in-flight handlers before tearing down telemetry so their
+	// spans close cleanly and their audit entries reach the sink. If the
+	// deadline expires we fail hard without touching the tracer or audit
+	// sink, since partial shutdown would ship truncated traces and race a
+	// live handler into a closed audit channel.
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	drainErr := ln.Drain(drainCtx)
+	drainCancel()
+	if drainErr != nil {
+		log.Fatalf("sidecar: handler drain did not complete: %v (telemetry left unflushed)", drainErr)
+	}
+
+	flushCtx, flushCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer flushCancel()
+	if err := shutdownTracer(flushCtx); err != nil {
+		log.Printf("sidecar: tracer shutdown: %v", err)
+	}
+
+	// audit.Close drains the buffered channel via a blocking io.Writer, so a
+	// stalled filesystem or backpressured stdout could otherwise wedge
+	// shutdown. Bound the wait and log on timeout. On timeout we do not
+	// close the underlying file because the drain goroutine may still be
+	// mid-write; closing underneath it would truncate the final entries.
+	// The OS reclaims the fd when the process exits.
+	auditCtx, auditCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer auditCancel()
+	auditDone := make(chan error, 1)
+	go func() { auditDone <- audit.Close() }()
+	select {
+	case err := <-auditDone:
+		if err != nil {
+			log.Printf("sidecar: audit close: %v", err)
+		}
+		if closeAuditFile != nil {
+			if err := closeAuditFile(); err != nil {
+				log.Printf("sidecar: audit file close: %v", err)
+			}
+		}
+	case <-auditCtx.Done():
+		log.Printf("sidecar: audit close timed out, last entries may be lost; leaving fd to process exit")
+	}
+}
+
+// openAuditWriter routes audit output to stdout (empty or "-") or a file,
+// creating the parent directory on demand.
+func openAuditWriter(path string) (io.Writer, func() error, error) {
+	if path == "" || path == "-" {
+		return os.Stdout, nil, nil
+	}
+	f, err := openAuditFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return nil, nil, auditFileError("permission setup")
+	}
+	return f, f.Close, nil
+}
+
+type auditFileError string
+
+func (e auditFileError) Error() string {
+	return "audit file " + string(e) + " failed"
 }
 
 // unweightedCategories returns the sorted pattern categories with no entry in

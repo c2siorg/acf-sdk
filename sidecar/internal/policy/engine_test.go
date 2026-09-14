@@ -77,7 +77,7 @@ func TestEngine_OnPrompt_BLOCK_JailbreakSignal(t *testing.T) {
 func TestEngine_OnPrompt_SANITISE_MidBand(t *testing.T) {
 	eng := newTestEngine(t)
 	// Score 0.55: above sanitise_score (0.50), below block_score (0.85).
-	// No hard-block signals — should be SANITISE.
+	// No hard-block signals: should be SANITISE.
 	rc := &riskcontext.RiskContext{
 		HookType:   "on_prompt",
 		Provenance: "user",

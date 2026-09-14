@@ -87,6 +87,24 @@ test_medium_score_sanitise if {
     result == "SANITISE"
 }
 
+test_score_below_configured_sanitise_threshold_allows if {
+    result := prompt.decision with input as {
+        "score": 0.45,
+        "signals": [],
+        "provenance": "sdk", "session_id": "s1", "hook_type": "on_prompt",
+    }
+    result == "ALLOW"
+}
+
+test_score_below_configured_block_threshold_sanitises if {
+    result := prompt.decision with input as {
+        "score": 0.82,
+        "signals": [],
+        "provenance": "sdk", "session_id": "s1", "hook_type": "on_prompt",
+    }
+    result == "SANITISE"
+}
+
 test_medium_score_sanitise_targets if {
     targets := prompt.sanitise_targets with input as {
         "score": 0.55,
