@@ -9,7 +9,21 @@ Public API:
     FirewallError  — base exception
     FirewallConnectionError — raised when the sidecar is unreachable
     FirewallBlocked — raised by adapters on BLOCK decisions
+
+Schema contracts:
+    ValidateRequest  — typed request envelope (SDK → sidecar)
+    ValidateResponse — typed response envelope (sidecar → SDK)
+    Signal           — named risk signal with score
+    HookType         — on_prompt | on_context | on_tool_call | on_memory
+    ProvenanceType   — user | rag | agent | sdk | system
 """
+from .contracts import (
+    HookType,
+    ProvenanceType,
+    Signal,
+    ValidateRequest,
+    ValidateResponse,
+)
 from .firewall import Firewall
 from .models import (
     ChunkResult,
@@ -28,4 +42,9 @@ __all__ = [
     "FirewallBlocked",
     "FirewallError",
     "FirewallConnectionError",
+    "ValidateRequest",
+    "ValidateResponse",
+    "Signal",
+    "HookType",
+    "ProvenanceType",
 ]
