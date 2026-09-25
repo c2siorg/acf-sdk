@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "frozen_at": "2026-09-11T22:19:44+01:00",
+  "frozen_at": "2026-09-12T12:58:41+01:00",
   "acf": {
     "repository": "https://github.com/c2siorg/ACF-SDK",
-    "commit": "511457818fc90fc3baf30c0ad8731050ea2521e0",
+    "commit": "2c484133e95e9a75f94dfdf4524583348b1f5aa5",
     "artifacts": [
       {
         "path": "policies/v1/data/jailbreak_patterns.json",
@@ -23,7 +23,7 @@
       },
       {
         "path": "sdk/python/acf/firewall.py",
-        "sha256": "503e93a183f64cd7dc2ea8f94146dbabe4e9546e17dc7659f4a5ca1c77a07038"
+        "sha256": "489818333c1fcdde9889de27271fd54e10e7827bc9bf9968972c42d93d2a1f33"
       }
     ],
     "pattern_provenance": {
