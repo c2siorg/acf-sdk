@@ -17,6 +17,7 @@ import (
 	"github.com/acf-sdk/sidecar/internal/crypto"
 	"github.com/acf-sdk/sidecar/internal/pipeline"
 	"github.com/acf-sdk/sidecar/internal/policy"
+	"github.com/acf-sdk/sidecar/internal/telemetry"
 	"github.com/acf-sdk/sidecar/internal/transport"
 )
 
@@ -104,6 +105,26 @@ func main() {
 		address = cfg.SocketPath
 	}
 
+	// Per-request timing log for overhead measurement. Off unless
+	// ACF_TIMING_LOG names a file.
+	var onTiming func(transport.Timing)
+	if p := os.Getenv("ACF_TIMING_LOG"); p != "" {
+		tl, err := telemetry.NewTimingLog(p)
+		if err != nil {
+			log.Fatalf("sidecar: failed to open timing log %s: %v", p, err)
+		}
+		defer func() {
+			if err := tl.Close(); err != nil {
+				log.Printf("sidecar: timing log close: %v", err)
+			}
+			if n := tl.Dropped(); n > 0 {
+				log.Printf("sidecar: timing log dropped %d records", n)
+			}
+		}()
+		onTiming = tl.Record
+		log.Printf("sidecar: timing log enabled (%s)", p)
+	}
+
 	// 8. Create and start listener.
 	ln, err := transport.NewListener(transport.Config{
 		Address:    address,
@@ -111,6 +132,7 @@ func main() {
 		Signer:     signer,
 		NonceStore: nonceStore,
 		Pipeline:   pl,
+		OnTiming:   onTiming,
 	})
 	if err != nil {
 		log.Fatalf("sidecar: failed to create listener on %s: %v", address, err)

@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"log"
 	"net"
+	"time"
 
+	"github.com/acf-sdk/sidecar/internal/clock"
 	"github.com/acf-sdk/sidecar/internal/crypto"
 	"github.com/acf-sdk/sidecar/internal/pipeline"
 	"github.com/acf-sdk/sidecar/pkg/riskcontext"
@@ -26,6 +28,62 @@ type Config struct {
 	// Pipeline is the enforcement pipeline. If nil, a hardcoded ALLOW is returned
 	// (Phase 1 fallback — should not be nil in Phase 2+).
 	Pipeline *pipeline.Pipeline
+	// OnTiming, if set, receives the step durations of each request that ran
+	// the pipeline and got a response. It is called after the response is
+	// written, on the connection goroutine, so it must not block. Nil in
+	// production, where no clock is read.
+	OnTiming func(Timing)
+}
+
+// Timing is how long each step of one request took inside the sidecar.
+type Timing struct {
+	HookType     string
+	Decision     byte
+	BlockedAt    string
+	PayloadBytes int
+	// Read covers reading the frame off the connection, including any wait
+	// for the client to finish sending it.
+	Read      time.Duration
+	Verify    time.Duration // HMAC over the signed message
+	Nonce     time.Duration // replay check
+	Unmarshal time.Duration // JSON payload into a RiskContext
+	Pipeline  pipeline.Trace
+	Log       time.Duration // per-request decision log line
+	Write     time.Duration // encode and write the response
+	// Total runs from the start of handleConn to the response being written.
+	Total time.Duration
+}
+
+// stopwatch times consecutive steps. When off it never reads the clock.
+type stopwatch struct {
+	on          bool
+	start, last time.Duration
+}
+
+func newStopwatch(on bool) stopwatch {
+	if !on {
+		return stopwatch{}
+	}
+	now := clock.Now()
+	return stopwatch{on: true, start: now, last: now}
+}
+
+// lap returns the time since the previous lap and starts the next one.
+func (s *stopwatch) lap() time.Duration {
+	if !s.on {
+		return 0
+	}
+	now := clock.Now()
+	d := now - s.last
+	s.last = now
+	return d
+}
+
+func (s *stopwatch) total() time.Duration {
+	if !s.on {
+		return 0
+	}
+	return clock.Since(s.start)
 }
 
 // Listener wraps a platform net.Listener and handles incoming connections.
@@ -91,12 +149,16 @@ func (l *Listener) Stop() {
 func (l *Listener) handleConn(conn net.Conn) {
 	defer conn.Close()
 
+	sw := newStopwatch(l.cfg.OnTiming != nil)
+	var tm Timing
+
 	// 1. Decode the frame header and payload.
 	rf, err := DecodeRequest(conn)
 	if err != nil {
 		log.Printf("transport: decode error: %v", err)
 		return
 	}
+	tm.Read = sw.lap()
 
 	// 2. Verify HMAC.
 	length := uint32(len(rf.Payload))
@@ -105,12 +167,14 @@ func (l *Listener) handleConn(conn net.Conn) {
 		log.Printf("transport: %v", ErrBadHMAC)
 		return
 	}
+	tm.Verify = sw.lap()
 
 	// 3. Check nonce replay.
 	if l.cfg.NonceStore.Seen(rf.Nonce[:]) {
 		log.Printf("transport: %v", ErrReplayNonce)
 		return
 	}
+	tm.Nonce = sw.lap()
 
 	// 4. Run pipeline if configured; fall back to ALLOW if not (Phase 1 compat).
 	decision := DecisionAllow
@@ -122,10 +186,18 @@ func (l *Listener) handleConn(conn net.Conn) {
 			conn.Write(resp) //nolint:errcheck
 			return
 		}
-		result := l.cfg.Pipeline.Run(&rc)
+		tm.Unmarshal = sw.lap()
+
+		var trace *pipeline.Trace
+		if sw.on {
+			trace = &tm.Pipeline
+		}
+		result := l.cfg.Pipeline.RunTraced(&rc, trace)
+		sw.lap() // the pipeline's own steps are in tm.Pipeline
 		decision = result.Decision
 		log.Printf("transport: session=%s hook=%s score=%.2f signals=%v decision=%d blocked_at=%s",
 			rc.SessionID, rc.HookType, result.Score, result.Signals, decision, result.BlockedAt)
+		tm.Log = sw.lap()
 
 		// 5. Write response (include sanitised payload if decision == SANITISE).
 		resp := EncodeResponse(&ResponseFrame{
@@ -134,6 +206,17 @@ func (l *Listener) handleConn(conn net.Conn) {
 		})
 		if _, err := conn.Write(resp); err != nil {
 			log.Printf("transport: write error: %v", err)
+			return
+		}
+		tm.Write = sw.lap()
+
+		if sw.on {
+			tm.HookType = rc.HookType
+			tm.Decision = decision
+			tm.BlockedAt = result.BlockedAt
+			tm.PayloadBytes = len(rf.Payload)
+			tm.Total = sw.total()
+			l.cfg.OnTiming(tm)
 		}
 		return
 	}

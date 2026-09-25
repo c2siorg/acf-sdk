@@ -13,7 +13,9 @@ package pipeline
 
 import (
 	"log"
+	"time"
 
+	"github.com/acf-sdk/sidecar/internal/clock"
 	"github.com/acf-sdk/sidecar/internal/config"
 	"github.com/acf-sdk/sidecar/internal/policy"
 	"github.com/acf-sdk/sidecar/pkg/decision"
@@ -35,6 +37,39 @@ type Result struct {
 	// SanitisedPayload is the transformed payload returned to the client when
 	// decision == Sanitise. Nil for Allow and Block decisions.
 	SanitisedPayload []byte
+}
+
+// Trace records how long each step of one pipeline run took.
+type Trace struct {
+	// Stages holds one entry per stage that ran, in run order. A strict-mode
+	// short-circuit leaves out the stages after the blocking one.
+	Stages []StageTiming
+	// Policy is the OPA evaluation time, zero when no evaluator ran.
+	Policy time.Duration
+	// Sanitise is the executor transform time, zero unless OPA returned
+	// SANITISE with targets.
+	Sanitise time.Duration
+}
+
+// StageTiming is the duration of one stage's Run.
+type StageTiming struct {
+	Name     string
+	Duration time.Duration
+}
+
+// now reads the clock only when tracing.
+func (tr *Trace) now() time.Duration {
+	if tr == nil {
+		return 0
+	}
+	return clock.Now()
+}
+
+func (tr *Trace) stage(s Stage, start time.Duration) {
+	if tr == nil {
+		return
+	}
+	tr.Stages = append(tr.Stages, StageTiming{Name: s.Name(), Duration: clock.Since(start)})
 }
 
 // Stage is a single pipeline stage. Run mutates rc in place and returns whether
@@ -76,10 +111,18 @@ func NewWithEvaluator(cfg *config.Config, stages []Stage, ev Evaluator) *Pipelin
 // In strict mode, the first hard block short-circuits execution.
 // In non-strict mode, all stages run and the final decision is taken after aggregate.
 func (p *Pipeline) Run(rc *riskcontext.RiskContext) Result {
+	return p.RunTraced(rc, nil)
+}
+
+// RunTraced is Run that also records step durations into tr. A nil tr records
+// nothing and does not read the clock.
+func (p *Pipeline) RunTraced(rc *riskcontext.RiskContext, tr *Trace) Result {
 	var blockedAt string
 
 	for _, s := range p.stages {
+		start := tr.now()
 		hardBlock := s.Run(rc)
+		tr.stage(s, start)
 		if hardBlock {
 			if p.cfg.Pipeline.StrictMode {
 				return Result{
@@ -101,14 +144,22 @@ func (p *Pipeline) Run(rc *riskcontext.RiskContext) Result {
 	var sanitised []byte
 
 	if p.evaluator != nil {
+		start := tr.now()
 		opaDecision, targets, err := p.evaluator.Evaluate(rc)
+		if tr != nil {
+			tr.Policy = clock.Since(start)
+		}
 		if err != nil {
 			log.Printf("pipeline: OPA evaluation error: %v (falling back to threshold)", err)
 			d = thresholdDecision(rc.Score, p.cfg.Thresholds)
 		} else {
 			d = decisionByte(opaDecision)
 			if d == decision.Sanitise && len(targets) > 0 {
+				start := tr.now()
 				sanitised = policy.ApplySanitise(targets, rc)
+				if tr != nil {
+					tr.Sanitise = clock.Since(start)
+				}
 			}
 		}
 	} else {
