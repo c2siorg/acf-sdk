@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "benchmark": "asb",
+  "repository": "agiresearch/ASB",
+  "commit": null,
+  "license": "MIT",
+  "upstream_cli": {
+    "setup": "pip install -r requirements.txt (upstream documents a Python 3.11 environment)",
+    "entrypoints": {
+      "attacks": "python scripts/agent_attack.py --cfg_path config/<attack>.yml",
+      "pot_backdoor": "python scripts/agent_attack_pot.py"
+    },
+    "configs_seen": ["config/DPI.yml", "config/OPI.yml", "config/MP.yml", "config/mixed.yml"],
+    "config_keys_seen": ["attack_tool", "llms", "attack_types", "defense_type"],
+    "note": "Taken from the upstream README. Confirm against the pinned commit before a run, and record the config used in the run's provenance."
+  },
+  "attack_types": [
+    "direct_prompt_injection",
+    "observation_prompt_injection",
+    "memory_poisoning",
+    "pot_backdoor",
+    "mixed"
+  ],
+  "metrics_upstream": ["ASR", "RR", "PNA", "FNR", "FPR"],
+  "files": {},
+  "notes": [
+    "commit is null until pinned: set it to a full 40-character SHA, then add each attack-case and agent-definition file to files with its SHA-256 so a run cannot score against content that drifted.",
+    "ASB is used from a clone rather than a package, so the pinned commit is the only version identifier.",
+    "Upstream runs Python 3.11; the ACF SDK needs 3.10 or newer, so one environment can host both."
+  ]
+}

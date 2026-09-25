@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "benchmark": "agentdojo",
+  "repository": "ethz-spylab/agentdojo",
+  "commit": null,
+  "license": "MIT",
+  "package": {
+    "name": "agentdojo",
+    "version": null,
+    "latest_seen": "0.1.35",
+    "latest_seen_released": "2025-10-27",
+    "requires_python": ">=3.10",
+    "install": "pip install 'agentdojo==<version>'",
+    "pi_detector_extra": "pip install 'agentdojo[transformers]==<version>'"
+  },
+  "upstream_cli": {
+    "entrypoint": "python -m agentdojo.scripts.benchmark",
+    "example": "python -m agentdojo.scripts.benchmark -s workspace -ut user_task_0 --model gpt-4o-2024-05-13 --defense tool_filter --attack tool_knowledge",
+    "defenses_seen": ["tool_filter"],
+    "attacks_seen": ["tool_knowledge"],
+    "note": "Only the values quoted in the upstream README are listed. Run the entrypoint with --help against the pinned version for the full set, and record what you used in the run's provenance."
+  },
+  "suites": null,
+  "files": {},
+  "notes": [
+    "version is null until a release is pinned: set it, install that exact version, and the runner then refuses to run against a different one.",
+    "commit and files stay empty while the benchmark is used as an installed package. Pin them only if the runner starts fetching data files straight from the repository.",
+    "suites is null until enumerated from the pinned install, so the list recorded here matches the version actually measured."
+  ]
+}
