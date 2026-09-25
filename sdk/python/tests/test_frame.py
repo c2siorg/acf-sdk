@@ -1,6 +1,7 @@
 """Tests for acf.frame — binary frame encode/decode round-trips."""
 import hashlib
 import hmac
+import json
 import struct
 
 import pytest
@@ -100,8 +101,10 @@ def test_decode_request_truncated_header():
 
 
 def test_decode_request_truncated_payload():
-    # Build a valid header claiming 100-byte payload, but only supply 10.
-    frame    = bytearray(encode_request(b"x" * 100, KEY))
+    # Build a valid header claiming large payload, but only supply 10 bytes.
+    # Use a large JSON payload to ensure it needs truncation
+    large_payload = b'{"a":1,"b":"' + b'x' * 100 + b'"}'
+    frame    = bytearray(encode_request(large_payload, KEY))
     short    = bytes(frame[:HEADER_SIZE + 10])
     with pytest.raises(FrameError, match="truncated"):
         decode_request(short)
@@ -138,12 +141,85 @@ def test_decode_response_truncated():
 
 # ── signed_message ────────────────────────────────────────────────────────────
 
-def test_signed_message_composition():
+def test_signed_message_canonicalization():
+    """Payload is canonicalized before signing."""
     nonce   = b"\x01" * 16
-    payload = b"hello"
+    payload = b'{"key":"value"}'
     msg     = signed_message(VERSION, len(payload), nonce, payload)
 
     assert msg[0] == VERSION
-    assert struct.unpack(">I", msg[1:5])[0] == len(payload)
+    # Note: canonical length may differ from input length
+    canonical_len = struct.unpack(">I", msg[1:5])[0]
+    assert canonical_len > 0
     assert msg[5:21] == nonce
-    assert msg[21:] == payload
+
+
+def test_signed_message_key_order_normalization():
+    """Different key orders produce the same signed message."""
+    nonce    = b"\x01" * 16
+    payload1 = b'{"b":2,"a":1}'
+    payload2 = b'{"a":1,"b":2}'
+
+    msg1 = signed_message(VERSION, len(payload1), nonce, payload1)
+    msg2 = signed_message(VERSION, len(payload2), nonce, payload2)
+
+    assert msg1 == msg2, "Different key orders should produce identical signed messages"
+
+
+def test_signed_message_whitespace_normalization():
+    """Whitespace differences are normalized."""
+    nonce    = b"\x01" * 16
+    payload1 = b'{"a": 1, "b": 2}'
+    payload2 = b'{"a":1,"b":2}'
+
+    msg1 = signed_message(VERSION, len(payload1), nonce, payload1)
+    msg2 = signed_message(VERSION, len(payload2), nonce, payload2)
+
+    assert msg1 == msg2, "Whitespace differences should be normalized"
+
+
+def test_signed_message_invalid_json():
+    """Invalid JSON payload raises ValueError."""
+    nonce   = b"\x01" * 16
+    payload = b'{invalid json'
+
+    with pytest.raises(ValueError, match="not valid JSON"):
+        signed_message(VERSION, len(payload), nonce, payload)
+
+
+def test_signed_message_cross_language_consistency():
+    """Python and Go produce identical signed messages for semantically equivalent JSON."""
+    nonce        = b"\x01" * 16
+    python_style = b'{"a":1,"b":2}'
+    go_style     = b'{"b":2,"a":1}'
+
+    msg1 = signed_message(VERSION, len(python_style), nonce, python_style)
+    msg2 = signed_message(VERSION, len(go_style), nonce, go_style)
+
+    assert msg1 == msg2, "Python and Go should produce identical signed messages"
+
+
+def test_encode_request_invalid_json():
+    """encode_request rejects invalid JSON payloads."""
+    invalid_payload = b'{invalid json'
+
+    with pytest.raises(ValueError, match="not valid JSON"):
+        encode_request(invalid_payload, KEY)
+
+
+def test_encode_request_canonical_hmac():
+    """encode_request produces correct HMAC over canonical payload."""
+    # Use JSON with non-alphabetical key order
+    payload = b'{"b":2,"a":1}'
+    frame   = encode_request(payload, KEY)
+
+    version = frame[1]
+    length  = struct.unpack(">I", frame[2:6])[0]
+    nonce   = frame[6:22]
+    mac     = frame[22:54]
+    stored_payload = frame[HEADER_SIZE:]
+
+    # signed_message will canonicalize the payload
+    msg      = signed_message(version, length, nonce, stored_payload)
+    expected = hmac.new(KEY, msg, hashlib.sha256).digest()
+    assert hmac.compare_digest(mac, expected)

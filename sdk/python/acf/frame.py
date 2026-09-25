@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac as _hmac
+import json
 import secrets
 import struct
 
@@ -46,25 +47,41 @@ class FrameError(Exception):
 
 
 def signed_message(version: int, length: int, nonce: bytes, payload: bytes) -> bytes:
-    """Return the byte string that is the HMAC input.
+    """Return the canonical byte string that is the HMAC input.
 
-    Layout: version(1B) || length(4B BE) || nonce(16B) || payload
+    Layout: version(1B) || length(4B BE) || nonce(16B) || canonical_payload
+    
+    The payload is canonicalized (JSON with sorted keys, no whitespace) to ensure
+    cross-language consistency with the Go sidecar.
+    
+    Raises ValueError if payload is not valid JSON.
     Must match SignedMessage() in sidecar/internal/transport/frame.go exactly.
     """
-    return struct.pack(">B I 16s", version, length, nonce) + payload
+    try:
+        obj = json.loads(payload)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Payload is not valid JSON: {e}")
+    
+    # Canonicalize: sorted keys, compact encoding, no whitespace
+    canonical = json.dumps(obj, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+    return struct.pack(">B I 16s", version, len(canonical), nonce) + canonical
 
 
 def encode_request(payload: bytes, key: bytes) -> bytes:
     """Encode a signed request frame.
 
-    Generates a fresh 16-byte nonce, computes HMAC-SHA256, and returns
-    the complete 54-byte header + payload frame.
+    Canonicalizes the payload, generates a fresh 16-byte nonce, computes HMAC-SHA256,
+    and returns the complete 54-byte header + original payload frame.
+    
+    Raises ValueError if payload is not valid JSON.
     """
     nonce  = secrets.token_bytes(16)
-    length = len(payload)
-    msg    = signed_message(VERSION, length, nonce, payload)
+    try:
+        msg    = signed_message(VERSION, len(payload), nonce, payload)
+    except ValueError as e:
+        raise ValueError(f"Failed to canonicalize payload: {e}")
     mac    = _hmac.new(key, msg, hashlib.sha256).digest()
-    header = struct.pack(_HEADER_FMT, MAGIC, VERSION, length, nonce, mac)
+    header = struct.pack(_HEADER_FMT, MAGIC, VERSION, len(payload), nonce, mac)
     return header + payload
 
 
