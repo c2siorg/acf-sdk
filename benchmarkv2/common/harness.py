@@ -20,6 +20,7 @@ import json
 import os
 import platform
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -232,10 +233,14 @@ def run_preflight(firewall: Firewall, allowlist: tuple[str, ...]) -> list[dict[s
         ("benign-context", lambda: firewall.on_context([BENIGN_CONTROL])[0].decision, {"ALLOW"}),
         ("injection-context", lambda: firewall.on_context([INJECTION_CONTROL])[0].decision,
          {"SANITISE", "BLOCK"}),
-        ("allowlisted-tool", lambda: decision_of(firewall.on_tool_call(allowlist[0], {})), {"ALLOW"}),
-        ("unauthorized-tool", lambda: decision_of(firewall.on_tool_call(UNAUTHORIZED_TOOL, {})),
-         {"BLOCK"}),
     ]
+    if allowlist:
+        controls.extend([
+            ("allowlisted-tool", lambda: decision_of(firewall.on_tool_call(allowlist[0], {})),
+             {"ALLOW"}),
+            ("unauthorized-tool", lambda: decision_of(firewall.on_tool_call(UNAUTHORIZED_TOOL, {})),
+             {"BLOCK"}),
+        ])
     results = []
     for control_id, call, expected in controls:
         verdict = call().name
@@ -295,7 +300,7 @@ class SidecarPool:
         socket_path = (
             rf"\\.\pipe\acf_{self.name}_{os.getpid()}_{number}"
             if IS_WINDOWS
-            else str(dest / "acf.sock")
+            else f"/tmp/acf-{os.getpid()}-{number}-{secrets.token_hex(6)}.sock"
         )
         log_path = dest / "sidecar.log"
         log = log_path.open("w", encoding="utf-8")
@@ -341,6 +346,8 @@ class SidecarPool:
                 process.kill()
                 process.wait(timeout=5)
         entry["log"].close()
+        if not IS_WINDOWS:
+            Path(entry["socket_path"]).unlink(missing_ok=True)
 
     def describe(self) -> list[dict[str, Any]]:
         with self.lock:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +18,22 @@ def test_arms_cover_every_enforcement_combination():
     ]
     assert harness.ARMS["none"].detect is False and harness.ARMS["none"].gate is None
     assert harness.ARMS["full-task"].detect is True and harness.ARMS["full-task"].gate == "task"
+
+
+def test_preflight_with_no_allowed_tools():
+    class Firewall:
+        def on_context(self, chunks):
+            verdict = harness.Decision.ALLOW if chunks[0] == harness.BENIGN_CONTROL \
+                else harness.Decision.BLOCK
+            return [SimpleNamespace(decision=verdict)]
+
+        def on_tool_call(self, name, params):
+            pytest.fail("a context-only sidecar should not check tool calls")
+
+    results = harness.run_preflight(Firewall(), ())
+    assert [result["id"] for result in results] == [
+        "benign-context", "injection-context"
+    ]
 
 
 def test_csv_choices_rejects_unknown_and_empty():

@@ -7,7 +7,7 @@ results.
 | Directory | Benchmark | What it measures | Status |
 |---|---|---|---|
 | [`injecagent/`](injecagent/) | InjecAgent | Attack success rate of a live LLM agent against indirect prompt injection, with and without ACF in the loop | Working; pilot run done |
-| [`agentdojo/`](agentdojo/) | AgentDojo | Benign utility, utility under attack and ASR, the security-and-utility trade-off, and the basis for comparison with CaMeL and Progent | Scaffold; upstream adapter to write |
+| [`agentdojo/`](agentdojo/) | AgentDojo | Benign utility, utility under attack and ASR, the security-and-utility trade-off, and the basis for comparison with CaMeL and Progent | Adapter implemented; model-free tests and sidecar preflight pass |
 | [`asb/`](asb/) | Agent Security Bench | Five attack classes across all four enforcement points, and which hook intercepts which class | Scaffold; upstream adapter to write |
 | [`overhead/`](overhead/) | Runtime overhead | Latency and throughput ACF adds, from single sidecar steps up to a Python SDK hook call | Working; full run done |
 | [`common/`](common/) | — | Shared plumbing: pinned downloads, sidecar startup, arms, provenance, result writing | Working |
@@ -47,9 +47,9 @@ runs the preflight controls, with no model calls and no cost:
 python benchmarkv2/<benchmark>/run_<benchmark>.py --dry-run --build-sidecar
 ```
 
-Preflight fails the run unless a benign context is allowed, an injected context
-is not allowed, an allowlisted tool is allowed, and an unknown tool is blocked.
-So a run can never score against a sidecar that was not enforcing.
+Preflight fails the run unless a benign context is allowed and an injected
+context is sanitised or blocked. For arms with a tool allowlist, it also checks
+that an allowed tool passes and an unknown tool is blocked.
 
 **5. Run a pilot**, with `--limit` and one or two arms, and check the output and
 the model spend before a full run. Mark pilot numbers as not reportable.
@@ -71,8 +71,8 @@ benchmark, so results line up across them.
 | `full-global` | yes | yes, global allowlist |
 | `full-task` | yes | yes, task allowlist |
 
-`none` first is deliberate: arms whose agent prompts are identical share cached
-model responses, so the undefended arm fills the cache for the rest.
+Each runner controls its own model caching. The AgentDojo adapter does not cache
+responses across arms; every model request counts against its attempt cap.
 
 A global allowlist repeats a disclosed bias, since the benchmark supplies both
 the test cases and the permitted tool names. A task allowlist is least
@@ -94,11 +94,11 @@ advance. Report both and label them.
 
 ### Reporting rules we hold to
 
-- Scoring happens **after** enforcement: a tool call ACF blocked counts as an
-  unsuccessful attack.
-- `SANITISE` counts as executed for a tool call, because the tool still runs
-  with sanitised parameters, and as caught for an observation, because the
-  agent no longer sees the original text.
+- Scoring uses the benchmark's task and attack checks after enforcement.
+- Tool calls may execute after `SANITISE` only when the runner can reconstruct
+  the sanitised arguments. AgentDojo withholds those calls and counts them
+  separately. Sanitised observations replace the original text before the
+  agent receives it.
 - Cases that fail with an API or firewall error are left out of the scores and
   reported separately as errors.
 - Where a benchmark's own text overlaps our pattern library, report the result
