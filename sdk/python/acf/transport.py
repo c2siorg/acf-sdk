@@ -15,13 +15,15 @@ Zero external dependencies — stdlib only (socket, ctypes, time).
 """
 from __future__ import annotations
 
+import math
+import os
 import platform
 import socket
 import struct
 import time
 
 from .frame import encode_request, decode_response, FrameError
-from .models import FirewallConnectionError
+from .models import FirewallConnectionError, FirewallTimeout
 
 _IS_WINDOWS = platform.system() == "Windows"
 
@@ -29,13 +31,69 @@ DEFAULT_SOCKET_PATH = r"\\.\pipe\acf" if _IS_WINDOWS else "/tmp/acf.sock"
 MAX_ATTEMPTS        = 3
 BACKOFF_BASE        = 0.1  # seconds — doubles on each retry
 
+# Ceiling for a single blocking IPC operation. Deliberately far above any real
+# sidecar latency so it only fires when the sidecar is wedged, but tight enough
+# that a stalled enforcement path cannot block the calling thread forever.
+# This matches the 30s budget the benchmark harnesses already assume.
+DEFAULT_TIMEOUT     = 30.0  # seconds
+
+
+def _clean_timeout(value: float | None, fallback: float | None) -> float | None:
+    """Normalise a timeout to a positive finite float, or None for "no ceiling".
+
+    Rejects zero, negatives, NaN and infinity: ``socket.settimeout(0)`` means
+    *non-blocking*, not "unbounded", so passing it through would silently break
+    every call. NaN and inf raise inside the socket layer, so they are rejected
+    here too.
+    """
+    if value is None:
+        return fallback
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    if not math.isfinite(v) or v <= 0:
+        return None if value is not None else fallback
+    return v
+
+
+def _resolve_timeout() -> float | None:
+    """Resolve the default timeout from ACF_TIMEOUT_MS.
+
+    Follows the existing ACF_SOCKET_PATH / ACF_HMAC_KEY convention. A value of
+    ``0`` disables the ceiling. An unparseable value falls back to
+    ``DEFAULT_TIMEOUT`` rather than raising.
+    """
+    raw = os.environ.get("ACF_TIMEOUT_MS", "").strip()
+    if not raw:
+        return DEFAULT_TIMEOUT
+    try:
+        ms = float(raw)
+    except ValueError:
+        return DEFAULT_TIMEOUT
+    if not math.isfinite(ms) or ms <= 0:
+        return None
+    return ms / 1000.0
+
 
 class Transport:
     """Low-level IPC client. One new connection is opened per request."""
 
-    def __init__(self, socket_path: str = DEFAULT_SOCKET_PATH, key: bytes = b"") -> None:
+    def __init__(self, socket_path: str = DEFAULT_SOCKET_PATH, key: bytes = b"",
+                 timeout: float | None = None) -> None:
+        """Create a transport.
+
+        Args:
+            socket_path: IPC address of the sidecar.
+            key: HMAC-SHA256 key shared with the sidecar.
+            timeout: Ceiling in seconds for a single blocking IPC operation.
+                ``None`` reads ``ACF_TIMEOUT_MS`` (falling back to
+                ``DEFAULT_TIMEOUT``); ``0`` disables the ceiling and restores
+                the previous unbounded behaviour.
+        """
         self.socket_path = socket_path
         self.key         = key
+        self.timeout     = _clean_timeout(timeout, _resolve_timeout())
 
     def send(self, payload: bytes) -> dict:
         """Sign and send *payload*, return the decoded response dict.
@@ -44,8 +102,13 @@ class Transport:
         ``FileNotFoundError`` (sidecar not yet started) using exponential
         backoff. All other ``OSError`` subclasses are re-raised immediately.
 
+        A timeout is **not** retried: the sidecar accepted the connection and
+        then stopped responding, so retrying would multiply the latency budget
+        rather than recover. Timeouts surface as ``FirewallTimeout``.
+
         Returns a dict with keys: decision (int), sanitised_payload (bytes).
         Raises FirewallConnectionError after exhausting retries.
+        Raises FirewallTimeout when a single attempt exceeds the timeout.
         """
         frame    = encode_request(payload, self.key)
         delay    = BACKOFF_BASE
@@ -60,6 +123,11 @@ class Transport:
                 if attempt < MAX_ATTEMPTS:
                     time.sleep(delay)
                     delay *= 2
+            except TimeoutError as exc:
+                raise FirewallTimeout(
+                    f"IPC round trip to {self.socket_path} exceeded "
+                    f"{self.timeout}s: {exc}"
+                ) from exc
 
         raise FirewallConnectionError(
             f"Could not connect to sidecar at {self.socket_path} "
@@ -75,6 +143,9 @@ class Transport:
     def _connect_and_send_uds(self, frame_bytes: bytes) -> bytes:
         """Unix Domain Socket path (Linux/macOS)."""
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            # Bound connect, write and read alike. Without this a sidecar that
+            # accepts and then goes quiet blocks the caller indefinitely.
+            sock.settimeout(self.timeout)
             sock.connect(self.socket_path)
             sock.sendall(frame_bytes)
             return self._read_response(sock)
@@ -173,7 +244,11 @@ class Transport:
 
 
 def _recv_exact(sock: socket.socket, n: int) -> bytes:
-    """Read exactly *n* bytes from *sock*, blocking until all bytes arrive."""
+    """Read exactly *n* bytes from *sock*.
+
+    Depends on the socket timeout set in :meth:`Transport._connect_and_send_uds`;
+    a wedged sidecar raises ``TimeoutError`` rather than blocking forever.
+    """
     buf = bytearray()
     while len(buf) < n:
         chunk = sock.recv(n - len(buf))
