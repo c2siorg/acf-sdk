@@ -6,6 +6,7 @@
 //  4. Zero-width character stripping
 //  5. Whitespace collapsing
 //  6. Leetspeak cleaning
+//  7. Joining letter-spaced words ("I g n o r e" → "Ignore")
 //
 // The result is written to rc.CanonicalText. The original rc.Payload is never
 // mutated. Normalise never emits a hard block signal — it is a pure transform.
@@ -18,6 +19,7 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
 
@@ -97,6 +99,7 @@ func normalise(text string) string {
 	text = stripZeroWidth(text)
 	text = collapseWhitespace(text)
 	text = cleanLeetspeak(text)
+	text = joinSpacedLetters(text)
 	return text
 }
 
@@ -285,6 +288,40 @@ func collapseWhitespace(text string) string {
 	return b.String()
 }
 
+// minSpacedRun is the shortest run of single letters that joinSpacedLetters
+// merges. Shorter runs such as "A B testing" are left alone.
+const minSpacedRun = 3
+
+// joinSpacedLetters merges runs of single letters separated by single spaces,
+// so "I g n o r e" becomes "Ignore". It expects collapseWhitespace to have run.
+func joinSpacedLetters(text string) string {
+	words := strings.Split(text, " ")
+	out := make([]string, 0, len(words))
+	for i := 0; i < len(words); {
+		j := i
+		for j < len(words) && isSingleLetter(words[j]) {
+			j++
+		}
+		switch {
+		case j-i >= minSpacedRun:
+			out = append(out, strings.Join(words[i:j], ""))
+		case j > i:
+			out = append(out, words[i:j]...)
+		default:
+			out = append(out, words[i])
+			j = i + 1
+		}
+		i = j
+	}
+	return strings.Join(out, " ")
+}
+
+// isSingleLetter reports whether w is exactly one letter.
+func isSingleLetter(w string) bool {
+	r, size := utf8.DecodeRuneInString(w)
+	return size > 0 && size == len(w) && unicode.IsLetter(r)
+}
+
 // normalisePattern applies only the character-level transforms that also run
 // on payloads, so the AC dictionary and CanonicalText use the same alphabet.
 // URL and base64 decoding are skipped because those are payload-specific.
@@ -293,6 +330,7 @@ func normalisePattern(p string) string {
 	p = stripZeroWidth(p)
 	p = collapseWhitespace(p)
 	p = cleanLeetspeak(p)
+	p = joinSpacedLetters(p)
 	return p
 }
 
