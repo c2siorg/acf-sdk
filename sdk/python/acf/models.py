@@ -58,6 +58,15 @@ class FirewallConnectionError(FirewallError):
     """Raised when the transport cannot connect to the sidecar after all retries."""
 
 
+class FirewallTimeout(FirewallConnectionError):
+    """Raised when an IPC round trip exceeds the configured timeout.
+
+    Subclasses ``FirewallConnectionError`` so that existing handlers which
+    catch it - and which therefore treat a missing sidecar as fail-closed -
+    keep behaving identically when the sidecar is reachable but wedged.
+    """
+
+
 class FirewallBlocked(FirewallError):
     """Raised by framework adapters when the firewall returns BLOCK.
 
