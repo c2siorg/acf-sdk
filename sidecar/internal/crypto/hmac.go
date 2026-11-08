@@ -8,11 +8,20 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 )
 
+// MinKeyBytes is the minimum accepted HMAC key length. The docs, the SDKs and
+// the key-generation helpers all assume a 32-byte key (64 hex characters);
+// anything shorter is short enough to brute force and is rejected at startup.
+const MinKeyBytes = 32
+
 // ErrEmptyKey is returned when a zero-length key is provided.
 var ErrEmptyKey = errors.New("crypto: HMAC key must not be empty")
+
+// ErrKeyTooShort is returned when a key is shorter than MinKeyBytes.
+var ErrKeyTooShort = fmt.Errorf("crypto: HMAC key must be at least %d bytes", MinKeyBytes)
 
 // ErrMissingEnvKey is returned when ACF_HMAC_KEY is not set.
 var ErrMissingEnvKey = errors.New("crypto: ACF_HMAC_KEY environment variable is not set")
@@ -23,10 +32,14 @@ type Signer struct {
 }
 
 // NewSigner creates a Signer from raw key bytes.
-// Returns ErrEmptyKey if key is nil or zero-length.
+// Returns ErrEmptyKey if key is nil or zero-length, and ErrKeyTooShort if it is
+// shorter than MinKeyBytes.
 func NewSigner(key []byte) (*Signer, error) {
 	if len(key) == 0 {
 		return nil, ErrEmptyKey
+	}
+	if len(key) < MinKeyBytes {
+		return nil, ErrKeyTooShort
 	}
 	k := make([]byte, len(key))
 	copy(k, key)
@@ -35,7 +48,7 @@ func NewSigner(key []byte) (*Signer, error) {
 
 // NewSignerFromEnv reads ACF_HMAC_KEY from the environment, hex-decodes it,
 // and returns a Signer. Returns an error if the variable is absent, empty,
-// or not valid hexadecimal.
+// not valid hexadecimal, or decodes to fewer than MinKeyBytes bytes.
 func NewSignerFromEnv() (*Signer, error) {
 	val := os.Getenv("ACF_HMAC_KEY")
 	if val == "" {

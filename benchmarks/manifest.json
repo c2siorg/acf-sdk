@@ -23,7 +23,7 @@
       },
       {
         "path": "sdk/python/acf/firewall.py",
-        "sha256": "5034b7abedae2c117c7abeb3b7d82f126cf49b02eb50378ae203bdd7f18e62eb"
+        "sha256": "9c2d7884778d85a1933ffeceb5744a27b095cbdd4048d73acc22cec82f971eb9"
       }
     ],
     "pattern_provenance": {

@@ -10,7 +10,7 @@ const path = require("node:path");
 
 const {
   Firewall, Decision, FirewallError, FirewallConnectionError, isSanitised, guardTool, BLOCKED_CALL,
-  firewallNode, FirewallBlocked,
+  firewallNode, FirewallBlocked, MIN_HMAC_KEY_BYTES,
 } = require("../dist/index.js");
 
 const KEY = crypto.randomBytes(32);
@@ -173,5 +173,36 @@ test("the key comes from ACF_HMAC_KEY as hex", () => {
   } finally {
     if (saved === undefined) delete process.env.ACF_HMAC_KEY;
     else process.env.ACF_HMAC_KEY = saved;
+  }
+});
+
+test("a key shorter than 32 bytes is rejected", () => {
+  assert.equal(MIN_HMAC_KEY_BYTES, 32);
+  for (const size of [0, 1, 2, 8, 31]) {
+    const hmacKey = Buffer.alloc(size, 0x61);
+    assert.throws(
+      () => new Firewall({ socketPath: socketPath(), hmacKey }),
+      (err) => err instanceof FirewallError && /at least 32/.test(err.message),
+      `${size}-byte key should be rejected`,
+    );
+  }
+});
+
+test("a hex key from ACF_HMAC_KEY shorter than 32 bytes is rejected", () => {
+  const saved = process.env.ACF_HMAC_KEY;
+  try {
+    for (const raw of ["ab", "00", "0102030405060708"]) {
+      process.env.ACF_HMAC_KEY = raw;
+      assert.throws(() => new Firewall(), /at least 32/, raw);
+    }
+  } finally {
+    if (saved === undefined) delete process.env.ACF_HMAC_KEY;
+    else process.env.ACF_HMAC_KEY = saved;
+  }
+});
+
+test("a 32-byte key is accepted and longer keys still work", () => {
+  for (const size of [32, 33, 64]) {
+    assert.ok(new Firewall({ socketPath: socketPath(), hmacKey: Buffer.alloc(size, 0x6b) }), `${size}-byte key`);
   }
 });

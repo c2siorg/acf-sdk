@@ -24,10 +24,17 @@ import {
   TaskScope,
 } from "./models";
 
+/**
+ * The docs, the sidecar and the key generators all assume a 32-byte key
+ * (64 hex characters). Anything shorter is short enough to brute force, so the
+ * SDK refuses it at construction rather than signing with it.
+ */
+export const MIN_HMAC_KEY_BYTES = 32;
+
 export interface FirewallOptions {
   /** Socket or pipe path. Default: ACF_SOCKET_PATH, else /tmp/acf.sock or \\.\pipe\acf. */
   socketPath?: string;
-  /** HMAC key bytes. Default: ACF_HMAC_KEY, hex-encoded. */
+  /** HMAC key bytes, at least 32. Default: ACF_HMAC_KEY, hex-encoded. */
   hmacKey?: Buffer;
   /** Per-request timeout in milliseconds. */
   timeoutMs?: number;
@@ -43,6 +50,13 @@ export class Firewall {
       if (!raw) throw new FirewallError("No HMAC key provided. Pass hmacKey or set ACF_HMAC_KEY (hex).");
       if (!/^([0-9a-fA-F]{2})+$/.test(raw)) throw new FirewallError("ACF_HMAC_KEY is not valid hex");
       key = Buffer.from(raw, "hex");
+    }
+    if (key.length < MIN_HMAC_KEY_BYTES) {
+      throw new FirewallError(
+        `HMAC key is too short (${key.length} bytes); it must be at least ${MIN_HMAC_KEY_BYTES} bytes. ` +
+          `Use a hex-encoded key of ${MIN_HMAC_KEY_BYTES * 2} characters, e.g. generate one with: ` +
+          `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`,
+      );
     }
     const path = options.socketPath ?? process.env.ACF_SOCKET_PATH ?? DEFAULT_SOCKET_PATH;
     this.transport = new Transport(path, key, options.timeoutMs);

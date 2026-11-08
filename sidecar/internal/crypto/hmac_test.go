@@ -2,7 +2,9 @@ package crypto
 
 import (
 	"encoding/hex"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -74,6 +76,32 @@ func TestNewSigner_EmptyKey(t *testing.T) {
 	}
 }
 
+func TestNewSigner_ShortKey(t *testing.T) {
+	cases := map[string]int{
+		"one byte": 1,
+		"eight":    8,
+		"31 bytes": MinKeyBytes - 1,
+	}
+	for name, size := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewSigner(make([]byte, size))
+			if !errors.Is(err, ErrKeyTooShort) {
+				t.Errorf("NewSigner(%d bytes) error = %v, want ErrKeyTooShort", size, err)
+			}
+		})
+	}
+}
+
+func TestNewSigner_MinKeyBytesAccepted(t *testing.T) {
+	s, err := NewSigner(make([]byte, MinKeyBytes))
+	if err != nil {
+		t.Fatalf("NewSigner(%d bytes): %v", MinKeyBytes, err)
+	}
+	if s == nil {
+		t.Fatalf("expected non-nil Signer for a %d-byte key", MinKeyBytes)
+	}
+}
+
 func TestNewSignerFromEnv_Valid(t *testing.T) {
 	key := make([]byte, 32)
 	for i := range key {
@@ -102,5 +130,31 @@ func TestNewSignerFromEnv_InvalidHex(t *testing.T) {
 	_, err := NewSignerFromEnv()
 	if err == nil {
 		t.Error("expected error for invalid hex value")
+	}
+}
+
+func TestNewSignerFromEnv_ShortKey(t *testing.T) {
+	for _, key := range []string{"ab", "00", "0102030405060708"} {
+		t.Run(key, func(t *testing.T) {
+			t.Setenv("ACF_HMAC_KEY", key)
+			s, err := NewSignerFromEnv()
+			if !errors.Is(err, ErrKeyTooShort) {
+				t.Errorf("ACF_HMAC_KEY=%q -> err = %v, want ErrKeyTooShort", key, err)
+			}
+			if s != nil {
+				t.Errorf("ACF_HMAC_KEY=%q -> expected nil Signer, got %v", key, s)
+			}
+		})
+	}
+}
+
+func TestNewSignerFromEnv_MinKeyBytesAccepted(t *testing.T) {
+	t.Setenv("ACF_HMAC_KEY", strings.Repeat("ab", MinKeyBytes))
+	s, err := NewSignerFromEnv()
+	if err != nil {
+		t.Fatalf("NewSignerFromEnv: %v", err)
+	}
+	if s == nil {
+		t.Fatal("expected non-nil Signer")
 	}
 }
