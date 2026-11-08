@@ -37,6 +37,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# The docs, the sidecar and the key-generation helpers all assume a 32-byte
+# key (64 hex characters). Anything shorter is short enough to brute force, so
+# the SDK refuses it at startup rather than signing with it.
+MIN_HMAC_KEY_BYTES = 32
+
 
 class Firewall:
     """Entry point for the ACF SDK.
@@ -45,8 +50,9 @@ class Firewall:
         socket_path: Path to the sidecar IPC address. Defaults to
                      ``/tmp/acf.sock`` on Linux/macOS or ``\\\\.\\pipe\\acf``
                      on Windows, or the ACF_SOCKET_PATH environment variable.
-        hmac_key:    Raw bytes of the HMAC key. If None, read ACF_HMAC_KEY
-                     from the environment (hex-encoded) and decode it.
+        hmac_key:    Raw bytes of the HMAC key (at least 32 bytes). If None,
+                     read ACF_HMAC_KEY from the environment (hex-encoded) and
+                     decode it.
         enable_semantic_scan:
                      If True, runs the semantic scanner on string payloads
                      before sending, pre-populating signals in the
@@ -71,9 +77,9 @@ class Firewall:
                      Default: "tfidf".
 
     Raises:
-        FirewallError: If no HMAC key can be resolved, or if semantic
-                       scanning is requested but the [scanners] extra is
-                       not installed.
+        FirewallError: If no HMAC key can be resolved, if the resolved key is
+                       shorter than 32 bytes, or if semantic scanning is
+                       requested but the [scanners] extra is not installed.
     """
 
     def __init__(
@@ -95,12 +101,20 @@ class Firewall:
             if not raw:
                 raise FirewallError(
                     "No HMAC key provided. Pass hmac_key= or set ACF_HMAC_KEY "
-                    "(hex-encoded, min 32 bytes)."
+                    f"(hex-encoded, min {MIN_HMAC_KEY_BYTES} bytes)."
                 )
             try:
                 hmac_key = binascii.unhexlify(raw)
             except (ValueError, binascii.Error) as exc:
                 raise FirewallError(f"ACF_HMAC_KEY is not valid hex: {exc}") from exc
+
+        if len(hmac_key) < MIN_HMAC_KEY_BYTES:
+            raise FirewallError(
+                f"HMAC key is too short ({len(hmac_key)} bytes); it must be at "
+                f"least {MIN_HMAC_KEY_BYTES} bytes. Use a hex-encoded key of "
+                f"{MIN_HMAC_KEY_BYTES * 2} characters, e.g. generate one with: "
+                "python -c 'import secrets; print(secrets.token_hex(32))'"
+            )
 
         self._transport = Transport(socket_path=resolved_path, key=hmac_key)
 

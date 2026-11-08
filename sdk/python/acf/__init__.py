@@ -10,8 +10,9 @@ Public API:
     FirewallError  — base exception
     FirewallConnectionError — raised when the sidecar is unreachable
     FirewallBlocked — raised by adapters on BLOCK decisions
+    MIN_HMAC_KEY_BYTES — minimum accepted HMAC key length (32)
 """
-from .firewall import Firewall
+from .firewall import MIN_HMAC_KEY_BYTES, Firewall
 from .models import (
     ChunkResult,
     Decision,
@@ -31,4 +32,5 @@ __all__ = [
     "FirewallBlocked",
     "FirewallError",
     "FirewallConnectionError",
+    "MIN_HMAC_KEY_BYTES",
 ]

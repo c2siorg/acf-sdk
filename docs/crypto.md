@@ -28,9 +28,9 @@ The shared key is loaded from the `ACF_HMAC_KEY` environment variable at sidecar
 ACF_HMAC_KEY=<hex-encoded key>
 ```
 
-`NewSignerFromEnv()` reads the variable, hex-decodes it, and returns a `Signer`. Startup fails fast if the variable is absent, empty, or contains invalid hex — the sidecar will not accept connections without a valid key.
+`NewSignerFromEnv()` reads the variable, hex-decodes it, and returns a `Signer`. Startup fails fast if the variable is absent, empty, contains invalid hex, or decodes to fewer than 32 bytes — the sidecar will not accept connections without a valid key.
 
-The same key value must be set in the Python environment before instantiating `Firewall`. Both sides derive their `Signer` independently from the same raw bytes; no key exchange happens at runtime.
+The same key value must be set in the Python environment before instantiating `Firewall`. Both sides derive their `Signer` independently from the same raw bytes; no key exchange happens at runtime. Both SDKs apply the same 32-byte minimum, so a short key is rejected on both sides of the channel rather than silently weakening the signature.
 
 ### What gets signed
 
