@@ -1,11 +1,12 @@
 // normalise.go — Stage 2 of the pipeline.
 // Produces canonical text for scanning by applying (in order):
 //  1. Recursive URL decoding
-//  2. Recursive Base64 decoding
-//  3. Unicode NFKC normalisation
-//  4. Zero-width character stripping
-//  5. Whitespace collapsing
-//  6. Leetspeak cleaning
+//  2. HTML entity decoding
+//  3. Recursive Base64 decoding
+//  4. Unicode NFKC normalisation
+//  5. Zero-width character stripping
+//  6. Whitespace collapsing
+//  7. Leetspeak cleaning
 //
 // The result is written to rc.CanonicalText. The original rc.Payload is never
 // mutated. Normalise never emits a hard block signal — it is a pure transform.
@@ -14,6 +15,7 @@ package pipeline
 import (
 	"encoding/base64"
 	"fmt"
+	"html"
 	"net/url"
 	"regexp"
 	"strings"
@@ -92,11 +94,25 @@ func payloadText(payload any) string {
 // normalise applies all transforms to text and returns the canonical form.
 func normalise(text string) string {
 	text = decodeURL(text)
+	text = decodeHTMLEntities(text)
 	text = decodeBase64(text)
 	text = applyNFKC(text)
 	text = stripZeroWidth(text)
 	text = collapseWhitespace(text)
 	text = cleanLeetspeak(text)
+	return text
+}
+
+// decodeHTMLEntities unescapes HTML character references (named, decimal, and hex).
+// Up to 5 passes are performed to resolve nested encodings (e.g. &amp;#105; -> &#105; -> i).
+func decodeHTMLEntities(text string) string {
+	for i := 0; i < 5; i++ {
+		decoded := html.UnescapeString(text)
+		if decoded == text {
+			return text
+		}
+		text = decoded
+	}
 	return text
 }
 
@@ -289,6 +305,7 @@ func collapseWhitespace(text string) string {
 // on payloads, so the AC dictionary and CanonicalText use the same alphabet.
 // URL and base64 decoding are skipped because those are payload-specific.
 func normalisePattern(p string) string {
+	p = decodeHTMLEntities(p)
 	p = applyNFKC(p)
 	p = stripZeroWidth(p)
 	p = collapseWhitespace(p)
