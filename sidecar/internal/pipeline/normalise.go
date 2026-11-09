@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -69,23 +70,62 @@ func NewNormaliseStage() *NormaliseStage {
 
 // payloadText extracts a string representation from the payload.
 // For string payloads, returns the string directly.
+// For structured payloads (e.g. on_tool_call with nested params, on_context),
+// it recursively collects all string values in deterministic (sorted-key) order.
 // For other types, uses fmt.Sprintf as a best-effort fallback.
 func payloadText(payload any) string {
 	switch v := payload.(type) {
 	case string:
 		return v
 	case map[string]any:
-		// For structured payloads (on_tool_call, on_context), concatenate all
-		// string values for scanning purposes.
-		var parts []string
-		for _, val := range v {
-			if s, ok := val.(string); ok {
-				parts = append(parts, s)
-			}
-		}
-		return strings.Join(parts, " ")
+		return extractStrings(v)
+	case []any:
+		return extractSliceStrings(v)
 	default:
 		return fmt.Sprintf("%v", v)
+	}
+}
+
+// extractStrings recursively collects all string values from a map,
+// sorting keys to ensure deterministic canonical text.
+func extractStrings(m map[string]any) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var parts []string
+	for _, k := range keys {
+		if s := collectStringLeaves(m[k]); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// extractSliceStrings recursively collects all string values from a slice.
+func extractSliceStrings(slice []any) string {
+	var parts []string
+	for _, item := range slice {
+		if s := collectStringLeaves(item); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// collectStringLeaves returns string leaf representations for JSON-shaped values.
+func collectStringLeaves(v any) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case map[string]any:
+		return extractStrings(val)
+	case []any:
+		return extractSliceStrings(val)
+	default:
+		return ""
 	}
 }
 
